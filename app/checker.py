@@ -284,7 +284,13 @@ async def check_target(client: httpx.AsyncClient, domain: str, target: str):
         "dns_a_records": dns_ips if dns_ips is not None else [],
     }
 
-    # Determine status.
+    # Determine status. Binary: 'operational' or 'down' (plus 'error' for DNS timeouts).
+    #
+    # Philosophy: if any HTTP server responded — even with a 4xx — the site is up.
+    # The PROTECTED status used to flag WAF-blocked sites separately, but that hid
+    # real problems: a 403 from Cloudflare looked the same as a 403 from a misconfigured
+    # site. Now we treat any HTTP response as evidence the site is reachable. If the
+    # server didn't respond at all (DNS fail, connection refused, timeout, 5xx), it's DOWN.
     if dns_ips is None:
         result["status"] = "error"
         result["error"] = "DNS resolution timed out"
@@ -293,28 +299,18 @@ async def check_target(client: httpx.AsyncClient, domain: str, target: str):
         result["error"] = "domain does not resolve (no A records)"
     elif http_result["ok"]:
         code = http_result["http_code"]
-        protection = _detect_protection(http_result)
-        # Inferred-protected fallback: if the site has a valid SSL cert AND
-        # responds with a typical bot-block code (403, 429, 503), it's almost
-        # certainly operational in a real browser — the server is up enough to
-        # complete TLS and respond, it's just refusing non-browser clients.
-        # We use this when the WAF doesn't identify itself in headers/body.
-        ssl_ok = (
-            ssl_info is not None
-            and ssl_info.get("days_left") is not None
-            and ssl_info.get("days_left") >= 0
-        )
-        looks_like_bot_block = code in (403, 429, 503)
-
-        if 200 <= code < 400:
+        # Anything 2xx, 3xx, or 4xx = the server responded. Site is up.
+        # Only 5xx counts as DOWN among successful HTTP responses.
+        if 200 <= code < 500:
             result["status"] = "operational"
-        elif protection:
-            result["status"] = "protected"
-            result["error"] = f"{protection} (HTTP {code}) — site likely operational in a real browser"
-        elif looks_like_bot_block and ssl_ok:
-            # SSL works, server is alive, just blocking non-browser clients.
-            result["status"] = "protected"
-            result["error"] = f"HTTP {code} with valid SSL — likely bot/WAF block, site is reachable"
+            # If 4xx, capture WAF/protection note for diagnostic context but
+            # don't change the status — the final_url column shows where it landed.
+            if code >= 400:
+                protection = _detect_protection(http_result)
+                if protection:
+                    result["error"] = f"{protection} (HTTP {code}) — site reachable"
+                else:
+                    result["error"] = f"HTTP {code} — site reachable"
         else:
             result["status"] = "down"
             result["error"] = f"HTTP {code}"

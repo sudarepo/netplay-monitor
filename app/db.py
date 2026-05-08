@@ -61,6 +61,10 @@ def init_db():
         );
         """)
 
+        # Migrate legacy data: PROTECTED status is gone — reclassify as operational.
+        # By definition, those rows had a server respond, so they're OPERATIONAL under the new rules.
+        conn.execute("UPDATE checks SET status = 'operational' WHERE status = 'protected'")
+
 
 @contextmanager
 def get_conn():

@@ -120,7 +120,6 @@
   .stat .value.up { color: var(--accent); }
   .stat .value.down { color: var(--danger); }
   .stat .value.warn { color: var(--warn); }
-  .stat .value.protected { color: #4338ca; }
 
   .header-meta {
     margin-left: 16px;
@@ -317,8 +316,6 @@
   .pill.down::before { background: var(--danger); }
   .pill.error { background: var(--warn-soft); color: var(--warn); border-color: rgba(180,83,9,0.25); }
   .pill.error::before { background: var(--warn); }
-  .pill.protected { background: #eef2ff; color: #4338ca; border-color: rgba(67,56,202,0.25); }
-  .pill.protected::before { background: #6366f1; }
   .pill.pending { background: var(--paper-2); color: var(--ink-muted); border-color: var(--rule); }
   .pill.pending::before { background: var(--ink-faint); }
 
@@ -563,15 +560,11 @@
         <span class="value up" id="stat-up">0</span>
       </div>
       <div class="stat">
-        <span class="label">Protected</span>
-        <span class="value protected" id="stat-prot">0</span>
-      </div>
-      <div class="stat">
         <span class="label">Down</span>
         <span class="value down" id="stat-down">0</span>
       </div>
       <div class="stat">
-        <span class="label">Errored</span>
+        <span class="label">Error</span>
         <span class="value warn" id="stat-err">0</span>
       </div>
     </div>
@@ -592,7 +585,6 @@
       <select id="filter-status">
         <option value="">All statuses</option>
         <option value="operational">Operational</option>
-        <option value="protected">Protected</option>
         <option value="down">Down</option>
         <option value="error">Error</option>
         <option value="any-issue">Any issue</option>
@@ -711,8 +703,8 @@ function pillFor(status) {
 }
 
 function statusOrder(s) {
-  // Sort: down < error < protected < operational < (no data)
-  return s === "down" ? 0 : s === "error" ? 1 : s === "protected" ? 2 : s === "operational" ? 3 : 4;
+  // Sort: down < error < operational < (no data)
+  return s === "down" ? 0 : s === "error" ? 1 : s === "operational" ? 2 : 3;
 }
 
 function applySort(rows) {
@@ -739,8 +731,7 @@ function applyFilters(rows) {
     if (f) {
       const a = r.apex?.status, w = r.www?.status;
       if (f === "any-issue") {
-        // "Any issue" means actually broken — protected sites are likely fine
-        // (they just can't be verified by a non-browser checker), so exclude them.
+        // "Any issue" means actually broken (down or errored).
         const isBad = (s) => s === "down" || s === "error";
         if (!isBad(a) && !isBad(w)) return false;
       } else {
@@ -797,19 +788,17 @@ function renderTable() {
 }
 
 function updateStats() {
-  let up=0, down=0, err=0, prot=0;
+  let up=0, down=0, err=0;
   for (const r of allResults) {
     for (const t of [r.apex, r.www]) {
       if (!t) continue;
       if (t.status === "operational") up++;
-      else if (t.status === "protected") prot++;
       else if (t.status === "down") down++;
       else if (t.status === "error") err++;
     }
   }
   $("stat-total").textContent = allResults.length;
   $("stat-up").textContent = up;
-  $("stat-prot").textContent = prot;
   $("stat-down").textContent = down;
   $("stat-err").textContent = err;
 }
