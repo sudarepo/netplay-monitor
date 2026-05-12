@@ -1,7 +1,8 @@
-"""FastAPI app â web UI + REST endpoints + APScheduler for background runs."""
+"""FastAPI app Ã¢ÂÂ web UI + REST endpoints + APScheduler for background runs."""
 import asyncio
 import csv
 import io
+import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -187,7 +188,7 @@ async def api_clear_domains():
 async def api_run():
     if run_state.active:
         return JSONResponse({"error": "a check run is already in progress"}, status_code=409)
-    # Fire and forget â UI polls /api/status for progress.
+    # Fire and forget Ã¢ÂÂ UI polls /api/status for progress.
     asyncio.create_task(execute_run(kind="manual"))
     return {"started": True}
 
@@ -272,7 +273,7 @@ async def api_export_csv():
 
 @app.post("/api/deploy")
 async def deploy(request: Request):
-    """Pull latest code from GitHub and restart service."""
+    """Pull latest code from GitHub and restart service (run once after push)."""
     try:
         result = subprocess.run(
             ['bash', '-c', 'cd /opt/k0ma-monitor && git fetch origin && git reset --hard origin/main'],
