@@ -6,14 +6,7 @@
 <title>Domain Trading Limited · Domain Monitor</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-:root{
-  --paper:#f0f4f8;--paper-2:#e2eaf3;--paper-3:#d5e0ed;
-  --ink:#1a1a2e;--ink-soft:#2c3e60;--ink-muted:#5a7090;--ink-faint:#a0b4c8;--rule:#c0d0e0;
-  --accent:#1a56a0;--accent-soft:#ddeeff;--accent-deep:#0d3572;
-  --warn:#b45309;--warn-soft:#fdf3e7;
-  --danger:#b42318;--danger-soft:#fbe9e7;
-  --ok:#0a6640;--ok-soft:#e0f5ea;
-}
+:root{--paper:#f0f4f8;--paper-2:#e2eaf3;--ink:#1a1a2e;--ink-muted:#5a7090;--ink-faint:#a0b4c8;--rule:#c0d0e0;--accent:#1a56a0;--accent-soft:#ddeeff;--accent-deep:#0d3572;--warn:#b45309;--warn-soft:#fdf3e7;--danger:#b42318;--danger-soft:#fbe9e7;--ok:#0a6640;--ok-soft:#e0f5ea;}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--paper);color:var(--ink);font-size:14px;line-height:1.5;min-height:100vh}
 a{color:var(--accent);text-decoration:none}
 header{background:var(--accent-deep);color:#fff;padding:0 24px;border-bottom:3px solid var(--accent)}
@@ -31,7 +24,7 @@ main{max-width:1500px;margin:0 auto;padding:24px}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:6px;border:1px solid var(--rule);background:#fff;color:var(--ink);font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;white-space:nowrap}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-.btn.primary:hover{background:var(--accent-deep);border-color:var(--accent-deep)}
+.btn.primary:hover{background:var(--accent-deep)}
 .btn.danger{color:var(--danger);border-color:var(--danger-soft)}
 .btn.danger:hover{background:var(--danger-soft)}
 .btn.sm{padding:3px 9px;font-size:12px}
@@ -39,21 +32,23 @@ main{max-width:1500px;margin:0 auto;padding:24px}
 .search-wrap{position:relative;flex:1;max-width:300px}
 .search-wrap input{width:100%;padding:7px 12px 7px 30px;border:1px solid var(--rule);border-radius:6px;background:#fff;font-size:13px;color:var(--ink)}
 .search-wrap input:focus{outline:none;border-color:var(--accent)}
-.search-icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--ink-muted);pointer-events:none;font-size:13px}
+.search-icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--ink-muted);pointer-events:none}
 .progress-wrap{height:4px;background:var(--paper-2);border-radius:2px;margin-bottom:12px;overflow:hidden}
 .bar-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .3s}
 .table-wrap{overflow-x:auto;border-radius:8px;border:1px solid var(--rule);background:#fff}
 table{width:100%;border-collapse:collapse}
 thead{background:var(--paper-2)}
-th{padding:10px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);border-bottom:1px solid var(--rule);white-space:nowrap;cursor:pointer;user-select:none}
-th:hover{color:var(--accent)}
-th.no-sort{cursor:default}th.no-sort:hover{color:var(--ink-muted)}
+th{padding:10px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);border-bottom:1px solid var(--rule);white-space:nowrap;user-select:none}
+th.sortable{cursor:pointer}
+th.sortable:hover{color:var(--accent)}
+th.sort-asc::after{content:" ▲";font-size:9px}
+th.sort-desc::after{content:" ▼";font-size:9px}
 td{padding:8px 12px;border-bottom:1px solid var(--paper-2);vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--accent-soft)}
-td.domain{font-weight:500;font-size:13px}
+td.domain-cell{font-weight:500;font-size:13px}
 td.code{font-family:monospace;font-size:12px;color:var(--ink-muted)}
-td.expiry-cell{font-size:12px;white-space:nowrap}
+td.url-cell{font-family:monospace;font-size:11px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 td.actions-cell{white-space:nowrap}
 td.actions-cell .btn{margin-right:3px}
 .pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
@@ -69,8 +64,12 @@ td.actions-cell .btn{margin-right:3px}
 .ds.expired{background:var(--danger-soft);color:var(--danger)}
 .ds.unknown{background:var(--paper-2);color:var(--ink-muted)}
 .empty{padding:48px;text-align:center}
-.empty .display{font-size:18px;font-weight:600;color:var(--ink-soft)}
+.empty .display{font-size:18px;font-weight:600;color:#2c3e60}
 .empty .hint{color:var(--ink-muted);margin-top:6px}
+.pagination{display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap}
+.pagination .page-info{font-size:13px;color:var(--ink-muted)}
+.page-size-wrap{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-muted)}
+.page-size-wrap select{padding:4px 8px;border:1px solid var(--rule);border-radius:6px;font-size:13px;background:#fff;color:var(--ink);cursor:pointer}
 .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;justify-content:center;align-items:center;padding:20px}
 .modal-backdrop.open{display:flex}
 .modal{background:#fff;border-radius:12px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2);padding:28px}
@@ -80,6 +79,9 @@ td.actions-cell .btn{margin-right:3px}
 .modal textarea{min-height:120px}
 .modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
 .modal label{display:block;font-size:12px;font-weight:600;color:var(--ink-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em}
+.check-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:12px 0}
+.check-grid label{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:400;color:var(--ink);text-transform:none;letter-spacing:0;cursor:pointer}
+.check-grid input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:var(--accent)}
 .kv .k{font-weight:600;color:var(--ink-muted);padding:6px 0 2px;border-top:1px solid var(--paper-2);font-size:12px;text-transform:uppercase}
 .kv .v{word-break:break-all;color:var(--ink);padding-bottom:6px;font-size:13px}
 .tabs{display:flex;border-bottom:2px solid var(--rule);margin-bottom:16px}
@@ -115,7 +117,7 @@ td.actions-cell .btn{margin-right:3px}
     <button class="btn primary" id="btn-run">&#9654; Run Checks</button>
     <button class="btn" id="btn-add">+ Add Domains</button>
     <button class="btn" id="btn-export">&#8595; Export CSV</button>
-    <button class="btn" id="btn-schedule">&#9200; Schedule</button>
+    <button class="btn" id="btn-schedule" title="Set how often checks run automatically">&#9200; Schedule</button>
     <div class="search-wrap">
       <span class="search-icon">&#128269;</span>
       <input type="text" id="search" placeholder="Search domains...">
@@ -128,18 +130,18 @@ td.actions-cell .btn{margin-right:3px}
     <table>
       <thead>
         <tr>
-          <th class="no-sort" style="width:36px"><input type="checkbox" id="chk-all" title="Select all"></th>
-          <th data-sort="domain">Domain</th>
-          <th data-sort="apex_status">Apex</th>
-          <th data-sort="apex_code">Code</th>
-          <th class="no-sort">Apex Final URL</th>
-          <th data-sort="www_status">WWW</th>
-          <th data-sort="www_code">Code</th>
-          <th class="no-sort">WWW Final URL</th>
-          <th data-sort="domain_status">Status</th>
-          <th data-sort="expiry_date">Expiry</th>
-          <th data-sort="ssl_days">SSL Days</th>
-          <th class="no-sort">Actions</th>
+          <th style="width:36px"><input type="checkbox" id="chk-all" title="Select all"></th>
+          <th class="sortable" data-sort="domain">Domain</th>
+          <th class="sortable" data-sort="apex_status">Apex</th>
+          <th class="sortable" data-sort="apex_code">Code</th>
+          <th>Apex Final URL</th>
+          <th class="sortable" data-sort="www_status">WWW</th>
+          <th class="sortable" data-sort="www_code">Code</th>
+          <th>WWW Final URL</th>
+          <th class="sortable" data-sort="domain_status">Status</th>
+          <th class="sortable" data-sort="expiry_date">Expiry</th>
+          <th class="sortable" data-sort="ssl_days">SSL Days</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody id="results-tbody">
@@ -147,7 +149,22 @@ td.actions-cell .btn{margin-right:3px}
       </tbody>
     </table>
   </div>
+  <div class="pagination" id="pagination" style="display:none">
+    <button class="btn sm" id="btn-prev">&#8592; Prev</button>
+    <span class="page-info" id="page-info"></span>
+    <button class="btn sm" id="btn-next">Next &#8594;</button>
+    <div class="page-size-wrap">
+      Show:
+      <select id="page-size">
+        <option value="50">50</option>
+        <option value="200">200</option>
+        <option value="500">500</option>
+      </select>
+      per page
+    </div>
+  </div>
 </main>
+
 <div class="modal-backdrop" id="modal-add">
   <div class="modal">
     <h2>Add Domains</h2>
@@ -157,12 +174,12 @@ td.actions-cell .btn{margin-right:3px}
     </div>
     <div id="tab-paste">
       <label>One domain per line</label>
-      <textarea id="add-text" placeholder="example.com"></textarea>
+      <textarea id="add-text" placeholder="example.com&#10;another.com"></textarea>
     </div>
     <div id="tab-upload" style="display:none">
       <div class="file-drop" id="file-drop">
         <div>Drop CSV here or click to browse</div>
-        <div style="font-size:12px;margin-top:4px;opacity:.7">Col 1 = domain, Col 6 = expiry date</div>
+        <div style="font-size:12px;margin-top:4px;opacity:.7">Col 1 = domain &nbsp;|&nbsp; Col 6 = expiry date</div>
         <input type="file" id="file-input" accept=".csv,.txt">
       </div>
       <div class="status-line" id="upload-status"></div>
@@ -173,11 +190,12 @@ td.actions-cell .btn{margin-right:3px}
     </div>
   </div>
 </div>
+
 <div class="modal-backdrop" id="modal-schedule">
   <div class="modal">
     <h2>Auto-Check Schedule</h2>
-    <p class="modal-sub">Interval in minutes. Set 0 to disable.</p>
-    <label>Minutes</label>
+    <p class="modal-sub">Automatically run domain checks at a set interval. Set to 0 to disable. Recommended: 60 minutes.</p>
+    <label>Interval (minutes)</label>
     <input type="text" id="schedule-input" placeholder="60">
     <div class="modal-footer">
       <button class="btn" data-close>Cancel</button>
@@ -185,6 +203,28 @@ td.actions-cell .btn{margin-right:3px}
     </div>
   </div>
 </div>
+
+<div class="modal-backdrop" id="modal-export">
+  <div class="modal">
+    <h2>Export CSV</h2>
+    <p class="modal-sub">Choose which columns to include in the export.</p>
+    <div class="check-grid">
+      <label><input type="checkbox" class="export-col" value="domain" checked disabled> Domain (always)</label>
+      <label><input type="checkbox" class="export-col" value="expiry" checked> Expiry Date</label>
+      <label><input type="checkbox" class="export-col" value="status" checked> Domain Status</label>
+      <label><input type="checkbox" class="export-col" value="apex"> Apex Status + Code</label>
+      <label><input type="checkbox" class="export-col" value="apex_url"> Apex Final URL</label>
+      <label><input type="checkbox" class="export-col" value="www"> WWW Status + Code</label>
+      <label><input type="checkbox" class="export-col" value="www_url"> WWW Final URL</label>
+      <label><input type="checkbox" class="export-col" value="ssl"> SSL Days Left</label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-close>Cancel</button>
+      <button class="btn primary" id="btn-export-go">Download CSV</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="modal-detail">
   <div class="modal" style="max-width:640px">
     <h2 id="detail-title"></h2>
@@ -193,9 +233,11 @@ td.actions-cell .btn{margin-right:3px}
     <div class="modal-footer"><button class="btn" data-close>Close</button></div>
   </div>
 </div>
+
 <script>
 const $=id=>document.getElementById(id);
-let allRows=[],sortKey="domain",sortDir=1;
+let allRows=[],sortKey="domain",sortDir=1,currentPage=1,pageSize=50;
+
 async function api(path,opts={}){
   const r=await fetch(path,{headers:{"Content-Type":"application/json"},...opts,body:opts.body?JSON.stringify(opts.body):undefined});
   if(!r.ok)throw new Error(await r.text());
@@ -214,7 +256,7 @@ function dsPill(s){
   if(s==="EXPIRED")return '<span class="ds expired">EXPIRED</span>';
   return '<span class="ds unknown">'+s+'</span>';
 }
-function renderRows(){
+function getSorted(){
   const q=$("search").value.toLowerCase();
   let rows=allRows.filter(r=>!q||r.domain.toLowerCase().includes(q));
   rows.sort((a,b)=>{
@@ -230,30 +272,54 @@ function renderRows(){
     else{av="";bv="";}
     if(av<bv)return -1*sortDir;if(av>bv)return 1*sortDir;return 0;
   });
+  return rows;
+}
+function renderRows(){
+  const rows=getSorted();
+  const total=rows.length;
+  const totalPages=Math.max(1,Math.ceil(total/pageSize));
+  if(currentPage>totalPages)currentPage=totalPages;
+  const start=(currentPage-1)*pageSize;
+  const pageRows=rows.slice(start,start+pageSize);
   const tbody=$("results-tbody");
-  if(!rows.length){tbody.innerHTML='<tr><td colspan="12"><div class="empty"><div class="display">No domains found.</div><div class="hint">Try a different search.</div></div></td></tr>';return;}
-  tbody.innerHTML=rows.map(r=>{
+  if(!rows.length){
+    tbody.innerHTML='<tr><td colspan="12"><div class="empty"><div class="display">No domains found.</div><div class="hint">Try a different search.</div></div></td></tr>';
+    $("pagination").style.display="none";
+    return;
+  }
+  tbody.innerHTML=pageRows.map(r=>{
     const a=r.apex,w=r.www;
     const sd=a?.ssl_days_left;
     const stxt=sd!=null?sd+"d":"&mdash;";
     const scol=sd!=null&&sd<14?"var(--danger)":sd!=null&&sd<30?"var(--warn)":"inherit";
     return '<tr data-domain="'+r.domain+'">'+
       '<td><input type="checkbox" class="row-chk" data-domain="'+r.domain+'"></td>'+
-      '<td class="domain"><a href="https://'+r.domain+'" target="_blank">'+r.domain+'</a></td>'+
+      '<td class="domain-cell"><a href="https://'+r.domain+'" target="_blank">'+r.domain+'</a></td>'+
       '<td>'+pillFor(a?.status)+'</td>'+
       '<td class="code">'+(a?.http_code||"&mdash;")+'</td>'+
-      '<td class="code" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(a?.final_url||"&mdash;")+'</td>'+
+      '<td class="url-cell">'+(a?.final_url||"&mdash;")+'</td>'+
       '<td>'+pillFor(w?.status)+'</td>'+
       '<td class="code">'+(w?.http_code||"&mdash;")+'</td>'+
-      '<td class="code" style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(w?.final_url||"&mdash;")+'</td>'+
+      '<td class="url-cell">'+(w?.final_url||"&mdash;")+'</td>'+
       '<td>'+dsPill(r.domain_status)+'</td>'+
-      '<td class="expiry-cell">'+(fmtExpiry(r.expiry_date)||'<span style="color:var(--ink-faint)">&mdash;</span>')+'</td>'+
+      '<td class="code" style="white-space:nowrap">'+(fmtExpiry(r.expiry_date)||'<span style="color:var(--ink-faint)">&mdash;</span>')+'</td>'+
       '<td class="code" style="color:'+scol+'">'+stxt+'</td>'+
       '<td class="actions-cell">'+
-        '<button class="btn sm" data-action="detail" data-domain="'+r.domain+'">Details</button> '+
-        '<button class="btn sm danger" data-action="delete" data-domain="'+r.domain+'">Remove</button>'+
+        '<button class="btn sm" data-action="detail" data-domain="'+r.domain+'">Details</button>'+
+        ' <button class="btn sm danger" data-action="delete" data-domain="'+r.domain+'">Remove</button>'+
       '</td></tr>';
   }).join("");
+  $("pagination").style.display="flex";
+  $("page-info").textContent="Page "+currentPage+" of "+totalPages+" ("+total+" domains)";
+  $("btn-prev").disabled=currentPage<=1;
+  $("btn-next").disabled=currentPage>=totalPages;
+  updateSortHeaders();
+}
+function updateSortHeaders(){
+  document.querySelectorAll("th.sortable").forEach(th=>{
+    th.classList.remove("sort-asc","sort-desc");
+    if(th.dataset.sort===sortKey)th.classList.add(sortDir===1?"sort-asc":"sort-desc");
+  });
 }
 function updateStats(){
   let total=0,active=0,expiring=0,expired=0,up=0,down=0;
@@ -295,22 +361,18 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("change",e=>{
   if(e.target.id==="chk-all"){document.querySelectorAll(".row-chk").forEach(c=>c.checked=e.target.checked);updateBulkBar();}
-  if(e.target.classList.contains("row-chk")){
-    updateBulkBar();
-    const all=document.querySelectorAll(".row-chk"),checked=document.querySelectorAll(".row-chk:checked");
-    $("chk-all").checked=all.length===checked.length&&all.length>0;
-  }
+  if(e.target.classList.contains("row-chk")){updateBulkBar();const all=document.querySelectorAll(".row-chk"),chk=document.querySelectorAll(".row-chk:checked");$("chk-all").checked=all.length===chk.length&&all.length>0;}
 });
 function updateBulkBar(){
-  const checked=document.querySelectorAll(".row-chk:checked");
-  if(checked.length>0){$("btn-bulk-remove").style.display="inline-flex";$("selected-count").textContent=checked.length;}
+  const chk=document.querySelectorAll(".row-chk:checked");
+  if(chk.length>0){$("btn-bulk-remove").style.display="inline-flex";$("selected-count").textContent=chk.length;}
   else{$("btn-bulk-remove").style.display="none";}
 }
 $("btn-bulk-remove").addEventListener("click",async()=>{
-  const checked=document.querySelectorAll(".row-chk:checked");
-  const domains=Array.from(checked).map(c=>c.dataset.domain);
+  const chk=document.querySelectorAll(".row-chk:checked");
+  const domains=Array.from(chk).map(c=>c.dataset.domain);
   if(!domains.length)return;
-  if(!confirm("Remove "+domains.length+" selected domain"+(domains.length>1?"s":"")+"?"))return;
+  if(!confirm("Remove "+domains.length+" domain"+(domains.length>1?"s":"")+"?"))return;
   for(const d of domains)await api("/api/domains/"+d,{method:"DELETE"});
   $("btn-bulk-remove").style.display="none";loadResults();
 });
@@ -347,7 +409,12 @@ async function handleFile(file){
   const j=await r.json();$("upload-status").textContent="Added: "+j.added+", Skipped: "+j.skipped;
   loadResults();
 }
-$("btn-export").addEventListener("click",()=>{window.location="/api/export";});
+$("btn-export").addEventListener("click",()=>openModal("modal-export"));
+$("btn-export-go").addEventListener("click",()=>{
+  const cols=Array.from(document.querySelectorAll(".export-col:checked")).map(c=>c.value);
+  window.location="/api/export?cols="+cols.join(",");
+  closeModal("modal-export");
+});
 $("btn-schedule").addEventListener("click",async()=>{
   const r=await api("/api/schedule");$("schedule-input").value=r.minutes||0;openModal("modal-schedule");
 });
@@ -355,8 +422,18 @@ $("btn-schedule-save").addEventListener("click",async()=>{
   const mins=parseInt($("schedule-input").value)||0;
   await api("/api/schedule",{method:"POST",body:{minutes:mins}});
   closeModal("modal-schedule");
-  alert(mins>0?"Checks every "+mins+" min.":"Scheduled checks off.");
+  alert(mins>0?"Checks will run automatically every "+mins+" minutes.":"Auto-check schedule disabled.");
 });
+$("btn-prev").addEventListener("click",()=>{if(currentPage>1){currentPage--;renderRows();}});
+$("btn-next").addEventListener("click",()=>{currentPage++;renderRows();});
+$("page-size").addEventListener("change",()=>{pageSize=parseInt($("page-size").value);currentPage=1;renderRows();});
+document.querySelectorAll("th.sortable").forEach(th=>{
+  th.addEventListener("click",()=>{
+    if(sortKey===th.dataset.sort)sortDir*=-1;else{sortKey=th.dataset.sort;sortDir=1;}
+    currentPage=1;renderRows();
+  });
+});
+$("search").addEventListener("input",()=>{currentPage=1;renderRows();});
 async function showDetail(domain){
   $("detail-title").textContent=domain;$("detail-sub").textContent="Loading...";$("detail-body").innerHTML="";
   openModal("modal-detail");
@@ -370,6 +447,9 @@ async function showDetail(domain){
       html+='<div class="k">SSL Issuer</div><div class="v">'+row.apex.ssl_issuer+'</div>';
       html+='<div class="k">SSL Expires</div><div class="v">'+(row.apex.ssl_expires_at||"&mdash;")+" ("+row.apex.ssl_days_left+"d left)</div>";
     }
+    if(row.apex?.dns_a_records){
+      try{const ips=JSON.parse(row.apex.dns_a_records);if(ips.length)html+='<div class="k">IP</div><div class="v">'+ips.join(", ")+'</div>';}catch(e){}
+    }
   }
   html+="</div>";
   if(history.length){
@@ -382,13 +462,6 @@ async function showDetail(domain){
   $("detail-sub").textContent=(row?.expiry_date?"Expires: "+fmtExpiry(row.expiry_date):"No expiry set")+" · "+history.length+" checks recorded";
   $("detail-body").innerHTML=html;
 }
-document.querySelectorAll("th[data-sort]").forEach(th=>{
-  th.addEventListener("click",()=>{
-    if(sortKey===th.dataset.sort)sortDir*=-1;else{sortKey=th.dataset.sort;sortDir=1;}
-    renderRows();
-  });
-});
-$("search").addEventListener("input",renderRows);
 loadResults();
 setInterval(loadResults,30000);
 </script>
