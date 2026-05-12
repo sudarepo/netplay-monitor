@@ -1,9 +1,11 @@
 <!DOCTYPE html>
+<!-- v2 -->
+
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Domain Trading Limited · Domain Monitor</title>
+<title>Domain Trading Limited Â· Domain Monitor</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--paper:#f0f4f8;--paper-2:#e2eaf3;--ink:#1a1a2e;--ink-muted:#5a7090;--ink-faint:#a0b4c8;--rule:#c0d0e0;--accent:#1a56a0;--accent-soft:#ddeeff;--accent-deep:#0d3572;--warn:#b45309;--warn-soft:#fdf3e7;--danger:#b42318;--danger-soft:#fbe9e7;--ok:#0a6640;--ok-soft:#e0f5ea;}
@@ -41,8 +43,8 @@ thead{background:var(--paper-2)}
 th{padding:10px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);border-bottom:1px solid var(--rule);white-space:nowrap;user-select:none}
 th.sortable{cursor:pointer}
 th.sortable:hover{color:var(--accent)}
-th.sort-asc::after{content:" ▲";font-size:9px}
-th.sort-desc::after{content:" ▼";font-size:9px}
+th.sort-asc::after{content:" â²";font-size:9px}
+th.sort-desc::after{content:" â¼";font-size:9px}
 td{padding:8px 12px;border-bottom:1px solid var(--paper-2);vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--accent-soft)}
@@ -459,7 +461,7 @@ async function showDetail(domain){
     }
     html+="</tbody></table></div>";
   }
-  $("detail-sub").textContent=(row?.expiry_date?"Expires: "+fmtExpiry(row.expiry_date):"No expiry set")+" · "+history.length+" checks recorded";
+  $("detail-sub").textContent=(row?.expiry_date?"Expires: "+fmtExpiry(row.expiry_date):"No expiry set")+" Â· "+history.length+" checks recorded";
   $("detail-body").innerHTML=html;
 }
 loadResults();
