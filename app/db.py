@@ -30,7 +30,7 @@ def init_db():
             domain TEXT PRIMARY KEY,
             added_at TEXT NOT NULL,
             expiry_date TEXT,
-            domain_status TEXT DEFAULT 'active',
+            domain_status TEXT DEFAULT 'ACTIVE',
             renewed_at TEXT,
             notes TEXT
         );
@@ -76,7 +76,7 @@ def init_db():
         except Exception:
             pass
         try:
-            conn.execute("ALTER TABLE domains ADD COLUMN domain_status TEXT DEFAULT 'active'")
+            conn.execute("ALTER TABLE domains ADD COLUMN domain_status TEXT DEFAULT 'ACTIVE'")
         except Exception:
             pass
         try:
@@ -115,7 +115,7 @@ def get_active_domains():
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT domain FROM domains
-            WHERE domain_status != 'expired' OR expiry_date IS NULL OR expiry_date > ?
+            WHERE domain_status != 'EXPIRED' OR expiry_date IS NULL OR expiry_date > ?
             ORDER BY domain
         """, (today,)).fetchall()
     return [r["domain"] for r in rows]
@@ -136,14 +136,14 @@ def clear_domains():
 def set_expiry_date(domain, expiry_date):
     """Set expiry date (YYYY-MM-DD string) and recalculate domain_status."""
     today = date.today()
-    status = "active"
+    status = "ACTIVE"
     if expiry_date:
         try:
             exp = date.fromisoformat(expiry_date[:10])
             if exp < today:
-                status = "expired"
+                status = "EXPIRED"
             elif exp <= today + timedelta(days=30):
-                status = "expiring"
+                status = "EXPIRING SOON"
         except ValueError:
             pass
     with get_conn() as conn:
@@ -157,7 +157,7 @@ def mark_renewed(domain):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
         conn.execute(
-            "UPDATE domains SET domain_status = 'active', renewed_at = ? WHERE domain = ?",
+            "UPDATE domains SET domain_status = 'ACTIVE', renewed_at = ? WHERE domain = ?",
             (now, domain)
         )
 
@@ -228,14 +228,14 @@ def get_all_results():
         dom = dr["domain"]
         expiry_date = dr["expiry_date"]
         # Compute domain_status dynamically
-        ds = "active"
+        ds = "ACTIVE"
         if expiry_date:
             try:
                 exp = date.fromisoformat(expiry_date[:10])
                 if exp < today:
-                    ds = "expired"
+                    ds = "EXPIRED"
                 elif exp <= today + timedelta(days=30):
-                    ds = "expiring"
+                    ds = "EXPIRING SOON"
             except ValueError:
                 pass
         c = checks_by_domain.get(dom, {})
