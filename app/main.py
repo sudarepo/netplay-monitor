@@ -297,21 +297,33 @@ async def api_test_eurodns():
     login = "api_prod_mediainternational"
     password = "ba4831e1"
     auth = base64.b64encode(f"{login}:{password}".encode()).decode()
-    headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
+    base = "https://rest-api.eurodns.com/v1"
     results = {}
-    endpoints = [
-        "https://agent.api.eurodns.com/domain/list",
-        "https://api.eurodns.com/domains",
-        "https://api.eurodns.com/v1/domains",
-        "https://api.eurodns.com/v2/domains",
-        "https://rest-api.eurodns.com/v1/domains",
-        "https://agent.api.eurodns.com/user/domain/list",
-    ]
     async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
-        for url in endpoints:
+        # Try different auth header styles on the working endpoint
+        auth_attempts = [
+            ("X-API-Key", password),
+            ("X-Api-Key", password),
+            ("Authorization", f"Basic {auth}"),
+            ("Authorization", f"ApiKey {password}"),
+            ("Authorization", f"Token {password}"),
+            ("X-Auth-Token", password),
+            ("X-Auth-Login", login),
+        ]
+        for hdr, val in auth_attempts:
             try:
-                r = await client.get(url, headers=headers)
-                results[url] = {"status": r.status_code, "body": r.text[:300]}
+                r = await client.get(f"{base}/domains", headers={hdr: val, "Accept": "application/json"})
+                results[f"{hdr}={val[:20]}"] = {"status": r.status_code, "body": r.text[:200]}
+                if r.status_code == 200:
+                    break
             except Exception as e:
-                results[url] = {"error": str(e)}
+                results[hdr] = {"error": str(e)}
+        # Also try with both login+password as separate headers
+        try:
+            r = await client.get(f"{base}/domains", headers={
+                "X-Auth-Login": login, "X-Auth-Password": password, "Accept": "application/json"
+            })
+            results["X-Auth-Login+Password"] = {"status": r.status_code, "body": r.text[:200]}
+        except Exception as e:
+            results["X-Auth-Login+Password"] = {"error": str(e)}
     return results
