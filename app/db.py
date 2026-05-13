@@ -286,6 +286,16 @@ def finish_run(run_id, operational, down, errored):
         """, (now, operational, down, errored, run_id))
 
 
+def close_stale_runs():
+    """Mark any runs with no finished_at as interrupted (e.g. from a service restart)."""
+    now = datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE runs SET finished_at=?, operational=0, down=0, errored=0 WHERE finished_at IS NULL",
+            (now,)
+        )
+
+
 def get_last_run():
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 1").fetchone()
