@@ -288,3 +288,31 @@ async def api_deploy(request: Request):
         return {"ok": True, "stdout": result.stdout, "stderr": result.stderr, "returncode": result.returncode}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/test-whois")
+async def api_test_whois(domain: str = "google.com"):
+    import subprocess
+    results = {}
+    # Test 1: system whois command
+    try:
+        r = subprocess.run(["whois", domain], capture_output=True, text=True, timeout=10)
+        results["system_whois"] = {"available": r.returncode == 0, "sample": r.stdout[:500] if r.stdout else r.stderr[:200]}
+    except Exception as e:
+        results["system_whois"] = {"available": False, "error": str(e)}
+    # Test 2: python-whois package
+    try:
+        import whois
+        w = whois.whois(domain)
+        results["python_whois"] = {"available": True, "registrar": str(w.registrar)}
+    except ImportError:
+        results["python_whois"] = {"available": False, "error": "not installed"}
+    except Exception as e:
+        results["python_whois"] = {"available": False, "error": str(e)}
+    # Test 3: pythonwhois package
+    try:
+        import pythonwhois
+        results["pythonwhois"] = {"available": True}
+    except ImportError:
+        results["pythonwhois"] = {"available": False, "error": "not installed"}
+    return results
