@@ -1,14 +1,13 @@
-"""FastAPI app Ã¢ÂÂ web UI + REST endpoints + APScheduler for background runs."""
+"""FastAPI app — web UI + REST endpoints + APScheduler for background runs."""
 import asyncio
 import csv
 import io
-import subprocess
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Request, UploadFile, Form, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi import FastAPI, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -19,157 +18,113 @@ from .checker import run_checks
 
 
 # --- Run state ---
-# We track the current run in memory so the UI can poll progress without
-# hammering the DB. Only one run can be active at a time.
+
 class RunState:
     def __init__(self):
-        self.active = False
-        self.kind = None
-        self.started_at = None
+        self.running = False
         self.done = 0
         self.total = 0
-        self.last_run_id = None
 
 run_state = RunState()
-run_lock = asyncio.Lock()
-scheduler = None  # type: ignore[var-annotated]
+_schedule_minutes: int = 0
+_scheduler: AsyncIOScheduler | None = None
 
 
 async def execute_run(kind: str = "manual"):
-    """Run all checks against the current domain list and persist results.
-
-    Held under run_lock so manual + scheduled can't collide.
-    """
-    async with run_lock:
-        if run_state.active:
-            return None
-        domains = [d["domain"] for d in db.get_all_domains()]
-        if not domains:
-            return None
-
-        run_state.active = True
-        run_state.kind = kind
-        run_state.started_at = datetime.now(timezone.utc).isoformat()
-        run_state.done = 0
-        run_state.total = len(domains) * 2
-
-        try:
-            def progress(done, total):
-                run_state.done = done
-                run_state.total = total
-
-            results = await run_checks(domains, on_progress=progress)
-
-            # Persist each check result.
-            for r in results:
-                db.save_check(r)
-
-            # Tally and write run summary.
-            operational = sum(1 for r in results if r["status"] == "operational")
-            down = sum(1 for r in results if r["status"] == "down")
-            errored = sum(1 for r in results if r["status"] == "error")
-
-            run_id = db.save_run({
-                "started_at": run_state.started_at,
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-                "kind": kind,
-                "total": len(results),
-                "operational": operational,
-                "down": down,
-                "errored": errored,
-            })
-            run_state.last_run_id = run_id
-            return run_id
-        finally:
-            run_state.active = False
-
-
-# --- Scheduler wiring ---
-
-def reschedule(interval_minutes):
-    """Set up or tear down the scheduled job. interval_minutes=None disables it."""
-    if scheduler is None:
+    if run_state.running:
         return
-    # Remove existing job if present
-    if scheduler.get_job("periodic_check"):
-        scheduler.remove_job("periodic_check")
+    run_state.running = True
+    run_state.done = 0
+    active_domains = db.get_active_domains()
+    run_state.total = len(active_domains)
+    run_id = db.start_run(kind, run_state.total)
+    try:
+        results = await run_checks(active_domains)
+        for result in results:
+            db.save_result(result)
+            run_state.done += 1
+        db.purge_expired_domains()
+        op = sum(1 for r in results if r.get("apex", {}) and r["apex"].get("status") == "up")
+        down = sum(1 for r in results if r.get("apex", {}) and r["apex"].get("status") == "down")
+        err = run_state.total - op - down
+        db.finish_run(run_id, op, down, err)
+    finally:
+        run_state.running = False
 
-    if interval_minutes and interval_minutes > 0:
-        scheduler.add_job(
+
+def reschedule(interval_minutes: int):
+    global _schedule_minutes, _scheduler
+    _schedule_minutes = interval_minutes
+    if _scheduler is None:
+        return
+    _scheduler.remove_all_jobs()
+    if interval_minutes > 0:
+        _scheduler.add_job(
             execute_run,
-            trigger=IntervalTrigger(minutes=interval_minutes),
-            id="periodic_check",
+            IntervalTrigger(minutes=interval_minutes),
+            id="auto_run",
             kwargs={"kind": "scheduled"},
-            max_instances=1,
-            coalesce=True,
             replace_existing=True,
         )
-        db.set_setting("schedule_minutes", interval_minutes)
-    else:
-        db.set_setting("schedule_minutes", 0)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _scheduler
     db.init_db()
-    global scheduler
-    scheduler = AsyncIOScheduler(timezone="UTC")
-    scheduler.start()
-    # Restore last schedule setting if any.
-    # If this is a fresh deployment with no setting yet, default to 60 minutes
-    # so the monitor actively does its job out of the box.
-    sm = db.get_setting("schedule_minutes")
-    if sm is None:
-        # First-ever boot: install a sensible default schedule.
-        reschedule(60)
-    elif sm:
-        try:
-            mins = int(sm)
-            if mins > 0:
-                reschedule(mins)
-        except ValueError:
-            pass
+    _scheduler = AsyncIOScheduler()
+    _scheduler.start()
     yield
-    scheduler.shutdown(wait=False)
+    _scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="Domain Monitor", lifespan=lifespan)
-
-BASE_DIR = Path(__file__).parent
+BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
 # --- Routes ---
 
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
+async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
-@app.get("/api/domains")
-async def api_domains():
-    return db.get_all_domains()
+@app.get("/api/results")
+async def api_results():
+    return db.get_all_results()
 
 
-@app.post("/api/domains/add")
-async def api_add_domains(payload: dict):
-    text = payload.get("text", "")
-    domains = _parse_domain_text(text)
-    added, skipped = db.add_domains(domains)
-    return {"added": added, "skipped": skipped, "total_input": len(domains)}
+@app.post("/api/run")
+async def api_run():
+    if run_state.running:
+        return {"ok": False, "msg": "Already running"}
+    asyncio.create_task(execute_run("manual"))
+    return {"ok": True}
 
 
-@app.post("/api/domains/upload")
-async def api_upload_domains(file: UploadFile):
-    raw = await file.read()
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        text = raw.decode("latin-1", errors="ignore")
-    domains = _parse_domain_text(text)
-    added, skipped = db.add_domains(domains)
-    return {"added": added, "skipped": skipped, "total_input": len(domains)}
+@app.get("/api/progress")
+async def api_progress():
+    return {"running": run_state.running, "done": run_state.done, "total": run_state.total}
+
+
+@app.post("/api/domains")
+async def api_add_domains(request: Request):
+    payload = await request.json()
+    domains = [d.strip().strip('"').strip("'").lower() for d in payload.get("domains", []) if d.strip()]
+    added = 0
+    for d in domains:
+        if d:
+            db.add_domain(d)
+            added += 1
+    return {"ok": True, "added": added}
+
+
+@app.delete("/api/domains")
+async def api_clear_domains():
+    db.clear_domains()
+    return {"ok": True}
 
 
 @app.delete("/api/domains/{domain}")
@@ -178,120 +133,85 @@ async def api_delete_domain(domain: str):
     return {"ok": True}
 
 
-@app.post("/api/domains/clear")
-async def api_clear_domains():
-    db.clear_all_domains()
+@app.post("/api/domains/upload")
+async def api_upload(file: UploadFile):
+    raw = await file.read()
+    text = raw.decode("utf-8-sig", errors="replace")
+    added = 0
+    updated = 0
+    reader = csv.reader(io.StringIO(text), delimiter=";")
+    for row in reader:
+        if not row:
+            continue
+        domain = row[0].strip().strip('"').strip("'").lower()
+        if not domain or domain.startswith("#"):
+            continue
+        expiry_date = None
+        if len(row) >= 6:
+            expiry_str = row[5].strip().strip('"').strip("'")
+            if expiry_str:
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+                    try:
+                        expiry_date = datetime.strptime(expiry_str, fmt).strftime("%Y-%m-%d")
+                        break
+                    except ValueError:
+                        continue
+        db.add_domain(domain)
+        if expiry_date:
+            db.set_expiry_date(domain, expiry_date)
+            updated += 1
+        else:
+            added += 1
+    return {"ok": True, "added": added, "updated": updated}
+
+
+@app.post("/api/domains/{domain}/expiry")
+async def api_set_expiry(domain: str, request: Request):
+    body = await request.json()
+    expiry_date = body.get("expiry_date", "")
+    db.set_expiry_date(domain, expiry_date)
     return {"ok": True}
 
 
-@app.post("/api/run")
-async def api_run():
-    if run_state.active:
-        return JSONResponse({"error": "a check run is already in progress"}, status_code=409)
-    # Fire and forget Ã¢ÂÂ UI polls /api/status for progress.
-    asyncio.create_task(execute_run(kind="manual"))
-    return {"started": True}
+@app.post("/api/domains/{domain}/renew")
+async def api_renew_domain(domain: str):
+    db.mark_renewed(domain)
+    return {"ok": True}
 
 
-@app.get("/api/status")
-async def api_status():
-    sm = db.get_setting("schedule_minutes", "0")
-    return {
-        "active": run_state.active,
-        "kind": run_state.kind,
-        "started_at": run_state.started_at,
-        "done": run_state.done,
-        "total": run_state.total,
-        "schedule_minutes": int(sm or 0),
-    }
+@app.get("/api/export")
+async def api_export():
+    return db.get_all_results()
 
 
-@app.get("/api/results")
-async def api_results():
-    """Latest result per domain+target."""
-    rows = db.get_latest_results()
-    # Group by domain so the UI renders one row per domain with apex+www columns.
-    by_domain = {}
-    for r in rows:
-        by_domain.setdefault(r["domain"], {})[r["target"]] = r
-    grouped = []
-    for domain in sorted(by_domain.keys()):
-        grouped.append({
-            "domain": domain,
-            "apex": by_domain[domain].get("apex"),
-            "www": by_domain[domain].get("www"),
-        })
-    return grouped
+@app.get("/api/domains/{domain}/history")
+async def api_history(domain: str):
+    return db.get_domain_history(domain)
 
 
-@app.get("/api/history/{domain}")
-async def api_history(domain: str, limit: int = 50):
-    return db.get_history_for_domain(domain, limit=limit)
-
-
-@app.get("/api/runs")
-async def api_runs():
-    return db.get_recent_runs(20)
+@app.get("/api/schedule")
+async def api_get_schedule():
+    return {"interval_minutes": _schedule_minutes}
 
 
 @app.post("/api/schedule")
-async def api_schedule(payload: dict):
-    minutes = int(payload.get("minutes") or 0)
-    reschedule(minutes if minutes > 0 else None)
-    return {"schedule_minutes": minutes}
+async def api_schedule(request: Request):
+    payload = await request.json()
+    minutes = int(payload.get("interval_minutes", 0))
+    reschedule(minutes)
+    return {"ok": True, "interval_minutes": minutes}
 
 
-@app.get("/api/export/csv")
-async def api_export_csv():
-    """Export the latest results as CSV."""
-    rows = db.get_latest_results()
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow([
-        "domain", "target", "checked_at", "status", "http_code", "final_url",
-        "response_ms", "dns_a_records", "ssl_issuer", "ssl_expires_at", "ssl_days_left",
-        "redirect_chain", "error",
-    ])
-    for r in rows:
-        writer.writerow([
-            r["domain"], r["target"], r["checked_at"], r["status"], r.get("http_code") or "",
-            r.get("final_url") or "", r.get("response_ms") or "",
-            ";".join(r.get("dns_a_records") or []),
-            r.get("ssl_issuer") or "", r.get("ssl_expires_at") or "", r.get("ssl_days_left") or "",
-            " -> ".join(f"{h.get('from')} ({h.get('code')})" for h in r.get("redirect_chain") or []),
-            r.get("error") or "",
-        ])
-    buf.seek(0)
-    return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=domain_monitor_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
-    )
-
-
-# --- One-time deploy endpoint ---
-
-@app.post("/api/deploy")
-async def deploy(request: Request):
-    """Pull latest code from GitHub and restart service (run once after push)."""
-    try:
-        result = subprocess.run(
-            ['bash', '-c', 'cd /opt/k0ma-monitor && git fetch origin && git reset --hard origin/main'],
-            capture_output=True, text=True, timeout=60
-        )
-        return {"ok": True, "stdout": result.stdout, "stderr": result.stderr, "returncode": result.returncode}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+@app.get("/api/stats")
+async def api_stats():
+    last_run = db.get_last_run()
+    return {"last_run": last_run}
 
 
 # --- Helpers ---
 
 def _parse_domain_text(text: str):
-    """Parse pasted text or uploaded csv/txt content into a list of domain strings.
-
-    Accepts: one per line, comma-separated, mixed. Handles common pollution like
-    schemes, www prefixes, paths, blank lines, BOM.
-    """
+    """Parse pasted text or uploaded csv/txt content into a list of domain strings."""
     if not text:
         return []
     text = text.replace("\r", "\n").replace("\t", ",").replace(";", ",")
