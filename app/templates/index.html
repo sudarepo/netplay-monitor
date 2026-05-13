@@ -67,6 +67,9 @@ td.actions-cell .btn{margin-right:3px}
 .ds.active{background:var(--ok-soft);color:var(--ok)}
 .ds.expiring{background:var(--warn-soft);color:var(--warn)}
 .ds.expired{background:var(--danger-soft);color:var(--danger)}
+.ds.grace{background:#fff3cd;color:#856404}
+.ds.redemption{background:#ffe0b2;color:#e65100}
+.ds.deleted{background:#f3e5f5;color:#7b1fa2}
 .ds.unknown{background:var(--paper-2);color:var(--ink-muted)}
 .empty{padding:48px;text-align:center}
 .empty .display{font-size:18px;font-weight:600;color:#2c3e60}
@@ -259,6 +262,9 @@ function dsPill(s){
   if(!s||s==="ACTIVE")return '<span class="ds active">ACTIVE</span>';
   if(s==="EXPIRING SOON")return '<span class="ds expiring">EXPIRING SOON</span>';
   if(s==="EXPIRED")return '<span class="ds expired">EXPIRED</span>';
+  if(s==="GRACE PERIOD")return '<span class="ds grace">GRACE PERIOD</span>';
+  if(s==="REDEMPTION")return '<span class="ds redemption">REDEMPTION</span>';
+  if(s==="DELETED")return '<span class="ds deleted">DELETED</span>';
   return '<span class="ds unknown">'+s+'</span>';
 }
 function getSorted(){
@@ -332,7 +338,7 @@ function updateStats(){
     total++;
     if(r.domain_status==="ACTIVE")active++;
     else if(r.domain_status==="EXPIRING SOON")expiring++;
-    else if(r.domain_status==="EXPIRED")expired++;
+    else if(r.domain_status==="EXPIRED"||r.domain_status==="GRACE PERIOD"||r.domain_status==="REDEMPTION"||r.domain_status==="DELETED")expired++;
     if(r.apex?.status==="operational"||r.www?.status==="operational")up++;
     if(r.apex?.status==="down"||r.www?.status==="down")down++;
   }
