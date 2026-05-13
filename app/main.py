@@ -289,3 +289,29 @@ async def api_deploy(request: Request):
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
+
+
+@app.get("/api/test-eurodns")
+async def api_test_eurodns():
+    import httpx, base64
+    login = "api_prod_mediainternational"
+    password = "ba4831e1"
+    auth = base64.b64encode(f"{login}:{password}".encode()).decode()
+    headers = {"Authorization": f"Basic {auth}", "Accept": "application/json"}
+    results = {}
+    endpoints = [
+        "https://agent.api.eurodns.com/domain/list",
+        "https://api.eurodns.com/domains",
+        "https://api.eurodns.com/v1/domains",
+        "https://api.eurodns.com/v2/domains",
+        "https://rest-api.eurodns.com/v1/domains",
+        "https://agent.api.eurodns.com/user/domain/list",
+    ]
+    async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+        for url in endpoints:
+            try:
+                r = await client.get(url, headers=headers)
+                results[url] = {"status": r.status_code, "body": r.text[:300]}
+            except Exception as e:
+                results[url] = {"error": str(e)}
+    return results
