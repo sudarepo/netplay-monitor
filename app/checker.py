@@ -21,9 +21,9 @@ import httpx
 
 # How long we wait per phase. Keep these tight — with 650 checks even small
 # timeouts add up if we let any single one stall the run.
-HTTP_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
+HTTP_TIMEOUT = httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0)
 DNS_TIMEOUT = 4.0
-SSL_TIMEOUT = 5.0
+SSL_TIMEOUT = 15.0
 
 # Pretend to be a real browser. Some shared hosting / WAFs block default httpx UA.
 USER_AGENT = (
