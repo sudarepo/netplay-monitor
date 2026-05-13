@@ -45,8 +45,8 @@ async def execute_run(kind: str = "manual"):
             db.save_result(result)
             run_state.done += 1
         db.purge_expired_domains()
-        op = sum(1 for r in results if r.get("apex", {}) and r["apex"].get("status") == "up")
-        down = sum(1 for r in results if r.get("apex", {}) and r["apex"].get("status") == "down")
+        op = sum(1 for r in results if r.get("target") == "apex" and r.get("status") == "operational")
+        down = sum(1 for r in results if r.get("target") == "apex" and r.get("status") == "down")
         err = run_state.total - op - down
         db.finish_run(run_id, op, down, err)
     finally:
@@ -73,6 +73,7 @@ def reschedule(interval_minutes: int):
 async def lifespan(app: FastAPI):
     global _scheduler
     db.init_db()
+    db.close_stale_runs()  # close any runs left open by a previous restart
     _scheduler = AsyncIOScheduler()
     _scheduler.start()
     yield
