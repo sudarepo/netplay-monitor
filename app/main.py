@@ -1,8 +1,9 @@
-"""FastAPI app — web UI + REST endpoints + APScheduler for background runs."""
+"""FastAPI app â web UI + REST endpoints + APScheduler for background runs."""
 import asyncio
 import csv
 import io
 from contextlib import asynccontextmanager
+from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,7 +28,7 @@ class RunState:
 
 run_state = RunState()
 _schedule_minutes: int = 0
-_scheduler: AsyncIOScheduler | None = None
+_scheduler: Optional[AsyncIOScheduler] = None
 
 
 async def execute_run(kind: str = "manual"):
