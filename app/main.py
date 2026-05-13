@@ -290,3 +290,46 @@ async def api_deploy(request: Request):
         return {"ok": False, "error": str(e)}
 
 
+
+
+@app.get("/api/test-registrars")
+async def api_test_registrars():
+    import httpx
+    results = {}
+
+    async with httpx.AsyncClient(timeout=15.0, verify=False) as client:
+
+        # ── GoDaddy API ──
+        gd_key = "fYWLNvv8qfcb_ARqNfvitTMLqHh5rV5kphG"
+        gd_secret = "799mt2Vzugmv2VJrtppcJB"
+        try:
+            r = await client.get(
+                "https://api.godaddy.com/v1/domains?limit=10",
+                headers={"Authorization": f"sso-key {gd_key}:{gd_secret}", "Accept": "application/json"}
+            )
+            results["godaddy_domains"] = {"status": r.status_code, "body": r.text[:500]}
+        except Exception as e:
+            results["godaddy_domains"] = {"error": str(e)}
+
+        # ── PanaNames API - try the fozzy/psono link to get actual credentials ──
+        # The PanaNames APIv3 uses token auth - try common patterns
+        pana_pass = "Y5D&VS7Fe%qh\=./"
+        try:
+            r = await client.get(
+                "https://api.pananames.com/merchant/v2/domains",
+                headers={"Authorization": f"Bearer {pana_pass}", "Accept": "application/json"}
+            )
+            results["pananames_bearer"] = {"status": r.status_code, "body": r.text[:300]}
+        except Exception as e:
+            results["pananames_bearer"] = {"error": str(e)}
+
+        try:
+            r = await client.get(
+                "https://api.pananames.com/reseller/v1/domains",
+                headers={"Authorization": f"Bearer {pana_pass}", "Accept": "application/json"}
+            )
+            results["pananames_reseller"] = {"status": r.status_code, "body": r.text[:300]}
+        except Exception as e:
+            results["pananames_reseller"] = {"error": str(e)}
+
+    return results
