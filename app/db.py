@@ -115,7 +115,7 @@ def get_active_domains():
     with get_conn() as conn:
         rows = conn.execute("""
             SELECT domain FROM domains
-            WHERE domain_status != 'EXPIRED' OR expiry_date IS NULL OR expiry_date > ?
+            WHERE domain_status IN ('ACTIVE', 'EXPIRING SOON') OR expiry_date IS NULL
             ORDER BY domain
         """, (today,)).fetchall()
     return [r["domain"] for r in rows]
@@ -140,7 +140,16 @@ def set_expiry_date(domain, expiry_date):
     if expiry_date:
         try:
             exp = date.fromisoformat(expiry_date[:10])
-            if exp < today:
+            days_past = (today - exp).days
+            if days_past > 60:
+                status = "DELETED"  # will be purged on next run
+            elif days_past >= 31:
+                status = "DELETED"
+            elif days_past >= 3:
+                status = "REDEMPTION"
+            elif days_past >= 1:
+                status = "GRACE PERIOD"
+            elif days_past == 0:
                 status = "EXPIRED"
             elif exp <= today + timedelta(days=30):
                 status = "EXPIRING SOON"
@@ -163,8 +172,8 @@ def mark_renewed(domain):
 
 
 def purge_expired_domains():
-    """Delete domains that expired more than 10 days ago."""
-    cutoff = (date.today() - timedelta(days=10)).isoformat()
+    """Delete domains expired more than 61 days ago (past DELETED stage)."""
+    cutoff = (date.today() - timedelta(days=61)).isoformat()
     with get_conn() as conn:
         conn.execute("DELETE FROM domains WHERE expiry_date IS NOT NULL AND expiry_date < ?", (cutoff,))
 
@@ -232,7 +241,16 @@ def get_all_results():
         if expiry_date:
             try:
                 exp = date.fromisoformat(expiry_date[:10])
-                if exp < today:
+                days_past = (today - exp).days
+                if days_past > 60:
+                    ds = "DELETED"  # will be purged
+                elif days_past >= 31:
+                    ds = "DELETED"
+                elif days_past >= 3:
+                    ds = "REDEMPTION"
+                elif days_past >= 1:
+                    ds = "GRACE PERIOD"
+                elif days_past == 0:
                     ds = "EXPIRED"
                 elif exp <= today + timedelta(days=30):
                     ds = "EXPIRING SOON"
