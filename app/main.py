@@ -271,3 +271,19 @@ def _parse_domain_text(text: str):
             if piece:
                 parts.append(piece)
     return parts
+
+
+@app.post("/api/deploy")
+async def api_deploy(request: Request):
+    import subprocess
+    auth = request.headers.get("authorization", "")
+    if auth != "Bearer deploy-k0ma-2024":
+        return {"ok": False, "error": "unauthorized"}
+    try:
+        result = subprocess.run(
+            "cd /opt/k0ma-monitor && git fetch origin && git reset --hard origin/main && systemctl restart k0ma-monitor",
+            shell=True, capture_output=True, text=True, timeout=60
+        )
+        return {"ok": True, "stdout": result.stdout, "stderr": result.stderr, "returncode": result.returncode}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
