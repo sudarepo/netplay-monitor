@@ -1,4 +1,4 @@
-"""FastAPI app â web UI + REST endpoints + APScheduler for background runs."""
+"""FastAPI app Ã¢ÂÂ web UI + REST endpoints + APScheduler for background runs."""
 import asyncio
 import csv
 import io
@@ -140,29 +140,77 @@ async def api_upload(file: UploadFile):
     text = raw.decode("utf-8-sig", errors="replace")
     added = 0
     updated = 0
-    reader = csv.reader(io.StringIO(text), delimiter=";")
+
+    # Auto-detect delimiter: use semicolon if more semicolons than commas in first line
+    first_line = text.split("\n")[0] if text else ""
+    delimiter = ";" if first_line.count(";") >= first_line.count(",") else ","
+
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    date_fmts = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%m-%d-%Y")
+
+    def parse_date(s):
+        s = s.strip().strip('"').strip("'")
+        if not s:
+            return None
+        for fmt in date_fmts:
+            try:
+                return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+            except ValueError:
+                continue
+        return None
+
+    def looks_like_date(s):
+        s = s.strip().strip('"').strip("'")
+        # Must contain digits and separators, and year must be 4 digits
+        import re
+        return bool(re.search(r'\b(19|20)\d{2}\b', s))
+
     for row in reader:
         if not row:
             continue
-        domain = row[0].strip().strip('"').strip("'").lower()
-        if not domain or domain.startswith("#"):
+        col0 = row[0].strip().strip('"').strip("'").lower()
+        if not col0 or col0.startswith("#"):
             continue
+        # Skip header rows
+        if col0 in ("domain", "name", "domain (punycode)", "domain(punycode)"):
+            continue
+
+        # Build domain name:
+        # If col1 exists and looks like a TLD (starts with . or is short extension), combine col0+col1
+        domain = col0
+        col1 = row[1].strip().strip('"').strip("'").lower() if len(row) > 1 else ""
+        if col1 and (col1.startswith(".") or (len(col1) <= 6 and "." not in col1 and col1.isalpha())):
+            tld = col1.lstrip(".")
+            if tld and "." not in col0:
+                domain = col0 + "." + tld
+
+        # Normalize domain
+        domain = domain.strip().strip('"').strip("'")
+        for prefix in ("https://", "http://"):
+            if domain.startswith(prefix):
+                domain = domain[len(prefix):]
+        domain = domain.split("/")[0].split("?")[0]
+        if domain.startswith("www."):
+            domain = domain[4:]
+        if not domain or " " in domain or "." not in domain:
+            continue
+
+        # Find expiry date: scan all columns for a valid date with 4-digit year
         expiry_date = None
-        if len(row) >= 6:
-            expiry_str = row[5].strip().strip('"').strip("'")
-            if expiry_str:
-                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
-                    try:
-                        expiry_date = datetime.strptime(expiry_str, fmt).strftime("%Y-%m-%d")
-                        break
-                    except ValueError:
-                        continue
+        for i, cell in enumerate(row[1:], 1):
+            if looks_like_date(cell):
+                parsed = parse_date(cell)
+                if parsed:
+                    expiry_date = parsed
+                    break
+
         db.add_domain(domain)
         if expiry_date:
             db.set_expiry_date(domain, expiry_date)
             updated += 1
         else:
             added += 1
+
     return {"ok": True, "added": added, "updated": updated}
 
 
