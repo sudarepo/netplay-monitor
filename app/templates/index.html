@@ -5,7 +5,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Domain Trading Limited ÃÂ· Domain Monitor</title>
+<title>Domain Trading Limited ÃÂÃÂ· Domain Monitor</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{--paper:#f0f4f8;--paper-2:#e2eaf3;--ink:#1a1a2e;--ink-muted:#5a7090;--ink-faint:#a0b4c8;--rule:#c0d0e0;--accent:#1a56a0;--accent-soft:#ddeeff;--accent-deep:#0d3572;--warn:#b45309;--warn-soft:#fdf3e7;--danger:#b42318;--danger-soft:#fbe9e7;--ok:#0a6640;--ok-soft:#e0f5ea;}
@@ -43,8 +43,8 @@ thead{background:var(--paper-2)}
 th{padding:10px 12px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-muted);border-bottom:1px solid var(--rule);white-space:nowrap;user-select:none}
 th.sortable{cursor:pointer}
 th.sortable:hover{color:var(--accent)}
-th.sort-asc::after{content:" Ã¢ÂÂ²";font-size:9px}
-th.sort-desc::after{content:" Ã¢ÂÂ¼";font-size:9px}
+th.sort-asc::after{content:" ÃÂ¢ÃÂÃÂ²";font-size:9px}
+th.sort-desc::after{content:" ÃÂ¢ÃÂÃÂ¼";font-size:9px}
 td{padding:8px 12px;border-bottom:1px solid var(--paper-2);vertical-align:middle}
 tr:last-child td{border-bottom:none}
 tr:hover td{background:var(--accent-soft)}
@@ -180,8 +180,8 @@ td.actions-cell .btn{margin-right:3px}
     </div>
     <div id="tab-upload" style="display:none">
       <div class="file-drop" id="file-drop">
-        <div>Drop CSV here or click to browse</div>
-        <div style="font-size:12px;margin-top:4px;opacity:.7">Col 1 = domain &nbsp;|&nbsp; Col 6 = expiry date</div>
+        <div id="drop-label">Drop CSV here or click to browse</div>
+        <div id="drop-hint" style="font-size:12px;margin-top:4px;opacity:.7">Col 1 = domain &nbsp;|&nbsp; Col 6 = expiry date</div>
         <input type="file" id="file-input" accept=".csv,.txt">
       </div>
       <div class="status-line" id="upload-status"></div>
@@ -393,10 +393,27 @@ document.querySelectorAll(".tab-btn").forEach(btn=>{
   });
 });
 $("btn-add-submit").addEventListener("click",async()=>{
-  const text=$("add-text").value.trim();if(!text)return;
-  const r=await api("/api/domains",{method:"POST",body:{domains:text}});
-  alert("Added: "+r.added+", Skipped: "+r.skipped);
-  $("add-text").value="";closeModal("modal-add");loadResults();
+  const activeTab=document.querySelector(".tab-btn.active");
+  const isUpload=activeTab&&activeTab.dataset.tab==="upload";
+  if(isUpload){
+    if(!_pendingFile){$("upload-status").textContent="Please select a CSV file first.";return;}
+    $("upload-status").textContent="Uploading...";
+    const form=new FormData();form.append("file",_pendingFile);
+    const r=await fetch("/api/domains/upload",{method:"POST",body:form});
+    const j=await r.json();
+    _pendingFile=null;
+    $("drop-label").textContent="Drop CSV here or click to browse";
+    $("drop-hint").textContent="Col 1 = domain \u00a0|\u00a0 Col 6 = expiry date";
+    $("upload-status").textContent="";
+    closeModal("modal-add");
+    await loadResults();
+    alert("Done! Added: "+j.added+", Updated: "+j.updated);
+  } else {
+    const text=$("add-text").value.trim();if(!text)return;
+    const r=await api("/api/domains",{method:"POST",body:{domains:text}});
+    $("add-text").value="";closeModal("modal-add");loadResults();
+    alert("Added: "+r.added);
+  }
 });
 const fd=$("file-drop");
 fd.addEventListener("click",()=>$("file-input").click());
@@ -404,12 +421,13 @@ fd.addEventListener("dragover",e=>{e.preventDefault();fd.classList.add("over");}
 fd.addEventListener("dragleave",()=>fd.classList.remove("over"));
 fd.addEventListener("drop",e=>{e.preventDefault();fd.classList.remove("over");handleFile(e.dataTransfer.files[0]);});
 $("file-input").addEventListener("change",e=>handleFile(e.target.files[0]));
-async function handleFile(file){
-  if(!file)return;$("upload-status").textContent="Uploading...";
-  const form=new FormData();form.append("file",file);
-  const r=await fetch("/api/domains/upload",{method:"POST",body:form});
-  const j=await r.json();$("upload-status").textContent="Added: "+j.added+", Skipped: "+j.skipped;
-  loadResults();
+let _pendingFile=null;
+function handleFile(file){
+  if(!file)return;
+  _pendingFile=file;
+  $("drop-label").textContent="✅ "+file.name;
+  $("drop-hint").textContent=file.size>0?(Math.round(file.size/1024))+" KB — click Add to import":"click Add to import";
+  $("upload-status").textContent="";
 }
 $("btn-export").addEventListener("click",()=>openModal("modal-export"));
 $("btn-export-go").addEventListener("click",()=>{
@@ -461,7 +479,7 @@ async function showDetail(domain){
     }
     html+="</tbody></table></div>";
   }
-  $("detail-sub").textContent=(row?.expiry_date?"Expires: "+fmtExpiry(row.expiry_date):"No expiry set")+" ÃÂ· "+history.length+" checks recorded";
+  $("detail-sub").textContent=(row?.expiry_date?"Expires: "+fmtExpiry(row.expiry_date):"No expiry set")+" ÃÂÃÂ· "+history.length+" checks recorded";
   $("detail-body").innerHTML=html;
 }
 loadResults();
