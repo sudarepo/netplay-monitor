@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -380,8 +380,81 @@ async def api_renew_domain(domain: str):
 
 
 @app.get("/api/export")
-async def api_export():
-    return db.get_all_results()
+async def api_export(cols: Optional[str] = None):
+    """Download a CSV of the current results. `cols` is a comma-separated list
+    of keys matching the export modal's checkbox values; defaults to all."""
+    results = db.get_all_results()
+
+    # Each selectable key maps to (header_list, row_extractor). A single key
+    # can produce one or two columns (Apex/WWW each have status + code).
+    column_defs = {
+        "domain":   (["Domain"], lambda r: [r.get("domain") or ""]),
+        "expiry":   (["Expiry Date"], lambda r: [r.get("expiry_date") or ""]),
+        "status":   (["Domain Status"], lambda r: [r.get("domain_status") or ""]),
+        "renewal":  (["Renewal Status"], lambda r: [r.get("renewal_status") or ""]),
+        "apex":     (
+            ["Apex Status", "Apex HTTP Code"],
+            lambda r: [
+                (r.get("apex") or {}).get("status") or "",
+                _csv_int((r.get("apex") or {}).get("http_code")),
+            ],
+        ),
+        "apex_url": (["Apex Final URL"], lambda r: [(r.get("apex") or {}).get("final_url") or ""]),
+        "www":      (
+            ["WWW Status", "WWW HTTP Code"],
+            lambda r: [
+                (r.get("www") or {}).get("status") or "",
+                _csv_int((r.get("www") or {}).get("http_code")),
+            ],
+        ),
+        "www_url":  (["WWW Final URL"], lambda r: [(r.get("www") or {}).get("final_url") or ""]),
+        "ssl":      (
+            ["SSL Days Left"],
+            lambda r: [_csv_int((r.get("apex") or {}).get("ssl_days_left"))],
+        ),
+    }
+
+    # Parse selected columns. Default to everything (in display order) if absent
+    # or empty. "domain" is always included as the first column.
+    if cols:
+        selected = [c.strip() for c in cols.split(",") if c.strip() in column_defs]
+    else:
+        selected = list(column_defs.keys())
+    if "domain" not in selected:
+        selected = ["domain"] + selected
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+
+    header = []
+    for key in selected:
+        header.extend(column_defs[key][0])
+    writer.writerow(header)
+
+    for r in results:
+        row = []
+        for key in selected:
+            row.extend(column_defs[key][1](r))
+        writer.writerow(row)
+
+    # Add a UTF-8 BOM so Excel auto-detects encoding.
+    csv_bytes = ("\ufeff" + buf.getvalue()).encode("utf-8")
+
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    filename = "domain-monitor-export-" + today + ".csv"
+
+    return Response(
+        content=csv_bytes,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="' + filename + '"'},
+    )
+
+
+def _csv_int(v):
+    """Render an int-like value as a clean string for CSV. None -> ''. """
+    if v is None:
+        return ""
+    return str(v)
 
 
 @app.get("/api/domains/{domain}/history")
