@@ -31,6 +31,7 @@ def init_db():
             added_at TEXT NOT NULL,
             expiry_date TEXT,
             domain_status TEXT DEFAULT 'ACTIVE',
+            renewal_status TEXT,
             renewed_at TEXT,
             notes TEXT
         );
@@ -70,19 +71,18 @@ def init_db():
             errored INTEGER
         );
         """)
-        # Migrate: add expiry_date column if missing
-        try:
-            conn.execute("ALTER TABLE domains ADD COLUMN expiry_date TEXT")
-        except Exception:
-            pass
-        try:
-            conn.execute("ALTER TABLE domains ADD COLUMN domain_status TEXT DEFAULT 'ACTIVE'")
-        except Exception:
-            pass
-        try:
-            conn.execute("ALTER TABLE domains ADD COLUMN renewed_at TEXT")
-        except Exception:
-            pass
+        # Migrations: add columns to existing installs. Each in its own try
+        # so they are independent and idempotent.
+        for ddl in (
+            "ALTER TABLE domains ADD COLUMN expiry_date TEXT",
+            "ALTER TABLE domains ADD COLUMN domain_status TEXT DEFAULT 'ACTIVE'",
+            "ALTER TABLE domains ADD COLUMN renewed_at TEXT",
+            "ALTER TABLE domains ADD COLUMN renewal_status TEXT",
+        ):
+            try:
+                conn.execute(ddl)
+            except Exception:
+                pass
         # Reclassify legacy PROTECTED status
         conn.execute("UPDATE checks SET status = 'operational' WHERE status = 'protected'")
 
@@ -105,7 +105,10 @@ def add_domain(domain):
 
 def get_all_domains():
     with get_conn() as conn:
-        rows = conn.execute("SELECT domain, added_at, expiry_date, domain_status, notes FROM domains ORDER BY domain").fetchall()
+        rows = conn.execute(
+            "SELECT domain, added_at, expiry_date, domain_status, renewal_status, notes "
+            "FROM domains ORDER BY domain"
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -162,6 +165,22 @@ def set_expiry_date(domain, expiry_date):
         )
 
 
+def set_renewal_status(domain, status):
+    """Set renewal_status to 'RENEW', 'NON-RENEW', or None.
+
+    Anything else is silently ignored to keep the column safe from garbage.
+    Pass an empty string or None to clear the value.
+    """
+    if status not in ("RENEW", "NON-RENEW", None, ""):
+        return
+    value = status if status else None
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE domains SET renewal_status = ? WHERE domain = ?",
+            (value, domain)
+        )
+
+
 def mark_renewed(domain):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:
@@ -210,7 +229,8 @@ def get_all_results():
     """Return latest check result for every domain, merged with domain metadata."""
     with get_conn() as conn:
         domain_rows = conn.execute(
-            "SELECT domain, added_at, expiry_date, domain_status FROM domains ORDER BY domain"
+            "SELECT domain, added_at, expiry_date, domain_status, renewal_status "
+            "FROM domains ORDER BY domain"
         ).fetchall()
         latest = conn.execute("""
             SELECT c.* FROM checks c
@@ -262,6 +282,7 @@ def get_all_results():
             "added_at": dr["added_at"],
             "expiry_date": expiry_date,
             "domain_status": ds,
+            "renewal_status": dr["renewal_status"],
             "apex": c.get("apex"),
             "www": c.get("www"),
         })

@@ -1,7 +1,8 @@
-"""FastAPI app Ã¢ÂÂ web UI + REST endpoints + APScheduler for background runs."""
+"""FastAPI app -- web UI + REST endpoints + APScheduler for background runs."""
 import asyncio
 import csv
 import io
+import re
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime, timezone
@@ -18,7 +19,135 @@ from . import db
 from .checker import run_checks
 
 
-# --- Run state ---
+# --- CSV parsing helpers ---------------------------------------------------
+
+_DATE_FMTS_NO_TIME = ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%m-%d-%Y")
+_DATE_FMTS_WITH_TIME = (
+    "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
+    "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
+    "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M",
+)
+
+_HEADER_DOMAIN = {
+    "domain", "domain name", "name", "url", "website",
+    "domain (punycode)", "domain(punycode)",
+}
+_HEADER_EXPIRY = {
+    "expiry", "expire", "expires", "expiration",
+    "expiry date", "expiration date",
+    "expires on", "expires at",
+    "expire date",
+}
+_HEADER_RENEWAL = {
+    "renew", "renewal", "renewal status", "renew status",
+    "auto renew", "autorenew",
+}
+
+_RENEWAL_AFFIRMATIVE = {
+    "auto renew", "auto-renew", "autorenew", "auto_renew",
+    "yes", "y", "true", "t", "1", "on",
+    "renew", "renewing", "enabled", "enable", "active",
+}
+_RENEWAL_NEGATIVE = {
+    "manual renew", "manual-renew", "manualrenew", "manual_renew",
+    "manual", "no", "n", "false", "f", "0", "off",
+    "non-renew", "non renew", "nonrenew", "non_renew",
+    "do not renew", "don't renew", "dont renew",
+    "expire", "let expire", "drop",
+    "disabled", "disable", "inactive", "not renewing",
+}
+
+
+def _clean_cell(s):
+    if s is None:
+        return ""
+    return s.strip().strip('"').strip("'")
+
+
+def _parse_date_cell(s):
+    s = _clean_cell(s)
+    if not s:
+        return None
+    # Strip time portion if present (anything after first whitespace) and try date-only first.
+    date_part = s.split()[0] if " " in s else s
+    for fmt in _DATE_FMTS_NO_TIME:
+        try:
+            return datetime.strptime(date_part, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    # Fallback: try formats that include time.
+    for fmt in _DATE_FMTS_WITH_TIME:
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+def _looks_like_date(s):
+    s = _clean_cell(s)
+    return bool(re.search(r"\b(19|20)\d{2}\b", s))
+
+
+def _normalize_domain(s):
+    s = _clean_cell(s).lower()
+    if not s:
+        return ""
+    for prefix in ("https://", "http://"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+    s = s.split("/")[0].split("?")[0]
+    if s.startswith("www."):
+        s = s[4:]
+    if not s or " " in s or "." not in s:
+        return ""
+    return s
+
+
+def _normalize_renewal(s):
+    s = _clean_cell(s).lower()
+    if not s:
+        return None
+    if s in _RENEWAL_AFFIRMATIVE:
+        return "RENEW"
+    if s in _RENEWAL_NEGATIVE:
+        return "NON-RENEW"
+    return None
+
+
+def _header_key(h):
+    return _clean_cell(h).lower().replace("-", " ").replace("_", " ")
+
+
+def _identify_columns(headers):
+    """Return dict with column indices for domain/expiry/renewal, or None if no domain column."""
+    out = {"domain": None, "expiry": None, "renewal": None}
+    for i, h in enumerate(headers):
+        hn = _header_key(h)
+        if out["domain"] is None and hn in _HEADER_DOMAIN:
+            out["domain"] = i
+        elif out["expiry"] is None and hn in _HEADER_EXPIRY:
+            out["expiry"] = i
+        elif out["renewal"] is None and hn in _HEADER_RENEWAL:
+            out["renewal"] = i
+    if out["domain"] is None:
+        return None
+    return out
+
+
+def _detect_delimiter(line):
+    """Prefer tab when present (PanaNames). Then semicolon. Default comma."""
+    tabs = line.count("\t")
+    semis = line.count(";")
+    commas = line.count(",")
+    if tabs > 0 and tabs >= semis and tabs >= commas:
+        return "\t"
+    if semis > commas:
+        return ";"
+    return ","
+
+
+# --- Run state -------------------------------------------------------------
 
 class RunState:
     def __init__(self):
@@ -86,7 +215,7 @@ app = FastAPI(lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
-# --- Routes ---
+# --- Routes ----------------------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -141,78 +270,91 @@ async def api_upload(file: UploadFile):
     text = raw.decode("utf-8-sig", errors="replace")
     added = 0
     updated = 0
+    renewal_set = 0
 
-    # Auto-detect delimiter: use semicolon if more semicolons than commas in first line
-    first_line = text.split("\n")[0] if text else ""
-    delimiter = ";" if first_line.count(";") >= first_line.count(",") else ","
+    # Auto-detect delimiter from first non-empty line (tab / semicolon / comma).
+    first_line = ""
+    for line in text.split("\n"):
+        if line.strip():
+            first_line = line
+            break
+    delimiter = _detect_delimiter(first_line)
 
     reader = csv.reader(io.StringIO(text), delimiter=delimiter)
-    date_fmts = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%d-%m-%Y", "%m-%d-%Y")
+    rows = list(reader)
+    if not rows:
+        return {"ok": True, "added": 0, "updated": 0, "renewal_set": 0}
 
-    def parse_date(s):
-        s = s.strip().strip('"').strip("'")
-        if not s:
-            return None
-        for fmt in date_fmts:
-            try:
-                return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
-            except ValueError:
-                continue
-        return None
+    # Try header-based parsing. If first row identifies a Domain column,
+    # use header positions for everything and skip row 0 as data.
+    header_map = _identify_columns(rows[0]) if rows else None
+    data_rows = rows[1:] if header_map else rows
 
-    def looks_like_date(s):
-        s = s.strip().strip('"').strip("'")
-        # Must contain digits and separators, and year must be 4 digits
-        import re
-        return bool(re.search(r'\b(19|20)\d{2}\b', s))
-
-    for row in reader:
+    for row in data_rows:
         if not row:
             continue
-        col0 = row[0].strip().strip('"').strip("'").lower()
-        if not col0 or col0.startswith("#"):
-            continue
-        # Skip header rows
-        if col0 in ("domain", "name", "domain (punycode)", "domain(punycode)"):
-            continue
 
-        # Build domain name:
-        # If col1 exists and looks like a TLD (starts with . or is short extension), combine col0+col1
-        domain = col0
-        col1 = row[1].strip().strip('"').strip("'").lower() if len(row) > 1 else ""
-        if col1 and (col1.startswith(".") or (len(col1) <= 6 and "." not in col1 and col1.isalpha())):
-            tld = col1.lstrip(".")
-            if tld and "." not in col0:
-                domain = col0 + "." + tld
+        # Resolve the domain cell.
+        if header_map:
+            di = header_map["domain"]
+            if di >= len(row):
+                continue
+            domain = _normalize_domain(row[di])
+        else:
+            domain = _normalize_domain(row[0]) if row else ""
 
-        # Normalize domain
-        domain = domain.strip().strip('"').strip("'")
-        for prefix in ("https://", "http://"):
-            if domain.startswith(prefix):
-                domain = domain[len(prefix):]
-        domain = domain.split("/")[0].split("?")[0]
-        if domain.startswith("www."):
-            domain = domain[4:]
-        if not domain or " " in domain or "." not in domain:
+            # Legacy fallback: combine col0 + col1 when TLD lives in a separate column.
+            if not domain and len(row) > 1:
+                col0 = _clean_cell(row[0]).lower()
+                col1 = _clean_cell(row[1]).lower()
+                if col0 and col1 and (col1.startswith(".") or (len(col1) <= 6 and "." not in col1 and col1.isalpha())):
+                    tld = col1.lstrip(".")
+                    if tld and "." not in col0:
+                        domain = _normalize_domain(col0 + "." + tld)
+
+        if not domain:
             continue
 
-        # Find expiry date: scan all columns for a valid date with 4-digit year
+        # Without headers, skip any row whose first cell is a known header label
+        # (defends against multi-section CSVs or stray header echoes).
+        if not header_map:
+            first_cell = _clean_cell(row[0]).lower()
+            if first_cell in _HEADER_DOMAIN:
+                continue
+
+        # Resolve expiry.
         expiry_date = None
-        for i, cell in enumerate(row[1:], 1):
-            if looks_like_date(cell):
-                parsed = parse_date(cell)
-                if parsed:
-                    expiry_date = parsed
-                    break
+        if header_map and header_map["expiry"] is not None:
+            ei = header_map["expiry"]
+            if ei < len(row):
+                expiry_date = _parse_date_cell(row[ei])
+        else:
+            for cell in row[1:]:
+                if _looks_like_date(cell):
+                    parsed = _parse_date_cell(cell)
+                    if parsed:
+                        expiry_date = parsed
+                        break
 
+        # Resolve renewal_status.
+        renewal_status = None
+        if header_map and header_map["renewal"] is not None:
+            ri = header_map["renewal"]
+            if ri < len(row):
+                renewal_status = _normalize_renewal(row[ri])
+
+        # Apply.
         db.add_domain(domain)
         if expiry_date:
             db.set_expiry_date(domain, expiry_date)
             updated += 1
         else:
             added += 1
+        if renewal_status:
+            db.set_renewal_status(domain, renewal_status)
+            renewal_set += 1
 
-    return {"ok": True, "added": added, "updated": updated}
+    return {"ok": True, "added": added, "updated": updated, "renewal_set": renewal_set}
 
 
 @app.post("/api/domains/{domain}/expiry")
@@ -220,6 +362,14 @@ async def api_set_expiry(domain: str, request: Request):
     body = await request.json()
     expiry_date = body.get("expiry_date", "")
     db.set_expiry_date(domain, expiry_date)
+    return {"ok": True}
+
+
+@app.post("/api/domains/{domain}/renewal")
+async def api_set_renewal(domain: str, request: Request):
+    body = await request.json()
+    status = body.get("renewal_status")
+    db.set_renewal_status(domain, status)
     return {"ok": True}
 
 
@@ -258,7 +408,7 @@ async def api_stats():
     return {"last_run": last_run}
 
 
-# --- Helpers ---
+# --- Helpers ---------------------------------------------------------------
 
 def _parse_domain_text(text: str):
     """Parse pasted text or uploaded csv/txt content into a list of domain strings."""
@@ -288,6 +438,3 @@ async def api_deploy(request: Request):
         return {"ok": True, "stdout": result.stdout, "stderr": result.stderr, "returncode": result.returncode}
     except Exception as e:
         return {"ok": False, "error": str(e)}
-
-
-

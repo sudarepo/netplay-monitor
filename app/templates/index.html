@@ -63,6 +63,11 @@ td.actions-cell .btn{margin-right:3px}
 .pill.redirect{background:var(--accent-soft);color:var(--accent)}
 .pill.warn{background:var(--warn-soft);color:var(--warn)}
 .pill.unknown{background:var(--paper-2);color:var(--ink-muted)}
+/* RENEWAL_PATCH_V1 */
+.rp{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap}
+.rp.renew{background:var(--ok-soft);color:var(--ok)}
+.rp.non-renew{background:#fff3cd;color:#856404}
+.rp.unknown{background:var(--paper-2);color:var(--ink-muted)}
 .ds{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:20px;font-size:11px;font-weight:700;white-space:nowrap}
 .ds.active{background:var(--ok-soft);color:var(--ok)}
 .ds.expiring{background:var(--warn-soft);color:var(--warn)}
@@ -147,13 +152,14 @@ td.actions-cell .btn{margin-right:3px}
           <th class="sortable" data-sort="www_code">Code</th>
           <th>WWW Final URL</th>
           <th class="sortable" data-sort="domain_status">Status</th>
+          <th class="sortable" data-sort="renewal_status">Renew</th>
           <th class="sortable" data-sort="expiry_date">Expiry</th>
           <th class="sortable" data-sort="ssl_days">SSL Days</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody id="results-tbody">
-        <tr><td colspan="12"><div class="empty"><div class="display">No domains yet.</div><div class="hint">Click Add Domains to begin monitoring.</div></div></td></tr>
+        <tr><td colspan="13"><div class="empty"><div class="display">No domains yet.</div><div class="hint">Click Add Domains to begin monitoring.</div></div></td></tr>
       </tbody>
     </table>
   </div>
@@ -187,7 +193,7 @@ td.actions-cell .btn{margin-right:3px}
     <div id="tab-upload" style="display:none">
       <div class="file-drop" id="file-drop">
         <div id="drop-label">Drop CSV here or click to browse</div>
-        <div id="drop-hint" style="font-size:12px;margin-top:4px;opacity:.7">Col 1 = domain &nbsp;|&nbsp; Col 6 = expiry date</div>
+        <div id="drop-hint" style="font-size:12px;margin-top:4px;opacity:.7">CSV or TSV. Headers auto-detected: Domain, Expiry, Renew</div>
         <input type="file" id="file-input" accept=".csv,.txt">
       </div>
       <div class="status-line" id="upload-status"></div>
@@ -220,6 +226,7 @@ td.actions-cell .btn{margin-right:3px}
       <label><input type="checkbox" class="export-col" value="domain" checked disabled> Domain (always)</label>
       <label><input type="checkbox" class="export-col" value="expiry" checked> Expiry Date</label>
       <label><input type="checkbox" class="export-col" value="status" checked> Domain Status</label>
+      <label><input type="checkbox" class="export-col" value="renewal" checked> Renewal Status</label>
       <label><input type="checkbox" class="export-col" value="apex"> Apex Status + Code</label>
       <label><input type="checkbox" class="export-col" value="apex_url"> Apex Final URL</label>
       <label><input type="checkbox" class="export-col" value="www"> WWW Status + Code</label>
@@ -258,6 +265,11 @@ function pillFor(s){
   const[cls,lbl]=map[s]||["unknown",s];
   return '<span class="pill '+cls+'"><span class="dot"></span>'+lbl+'</span>';
 }
+function renewPill(s){
+  if(s==='RENEW')return '<span class="rp renew"><span class="dot"></span>RENEW</span>';
+  if(s==='NON-RENEW')return '<span class="rp non-renew"><span class="dot"></span>NON-RENEW</span>';
+  return '<span class="rp unknown">&mdash;</span>';
+}
 function dsPill(s){
   if(!s||s==="ACTIVE")return '<span class="ds active">ACTIVE</span>';
   if(s==="EXPIRING SOON")return '<span class="ds expiring">EXPIRING SOON</span>';
@@ -274,6 +286,7 @@ function getSorted(){
     let av,bv;
     if(sortKey==="domain"){av=a.domain;bv=b.domain;}
     else if(sortKey==="domain_status"){av=a.domain_status||"";bv=b.domain_status||"";}
+    else if(sortKey==="renewal_status"){av=a.renewal_status||"~";bv=b.renewal_status||"~";}
     else if(sortKey==="expiry_date"){av=a.expiry_date||"";bv=b.expiry_date||"";}
     else if(sortKey==="apex_status"){av=a.apex?.status||"";bv=b.apex?.status||"";}
     else if(sortKey==="apex_code"){av=a.apex?.http_code||0;bv=b.apex?.http_code||0;}
@@ -294,7 +307,7 @@ function renderRows(){
   const pageRows=rows.slice(start,start+pageSize);
   const tbody=$("results-tbody");
   if(!rows.length){
-    tbody.innerHTML='<tr><td colspan="12"><div class="empty"><div class="display">No domains found.</div><div class="hint">Try a different search.</div></div></td></tr>';
+    tbody.innerHTML='<tr><td colspan="13"><div class="empty"><div class="display">No domains found.</div><div class="hint">Try a different search.</div></div></td></tr>';
     $("pagination").style.display="none";
     return;
   }
@@ -313,6 +326,7 @@ function renderRows(){
       '<td class="code">'+(w?.http_code||"&mdash;")+'</td>'+
       '<td class="url-cell">'+(w?.final_url||"&mdash;")+'</td>'+
       '<td>'+dsPill(r.domain_status)+'</td>'+
+      '<td>'+renewPill(r.renewal_status)+'</td>'+
       '<td class="code" style="white-space:nowrap">'+(fmtExpiry(r.expiry_date)||'<span style="color:var(--ink-faint)">&mdash;</span>')+'</td>'+
       '<td class="code" style="color:'+scol+'">'+stxt+'</td>'+
       '<td class="actions-cell">'+
@@ -412,7 +426,7 @@ $("btn-add-submit").addEventListener("click",async()=>{
     const j=await r.json();
     _pendingFile=null;
     $("drop-label").textContent="Drop CSV here or click to browse";
-    $("drop-hint").textContent="Col 1 = domain \u00a0|\u00a0 Col 6 = expiry date";
+    $("drop-hint").textContent="CSV or TSV. Headers auto-detected: Domain, Expiry, Renew";
     $("upload-status").textContent="";
     closeModal("modal-add");
     await loadResults();
@@ -471,6 +485,7 @@ async function showDetail(domain){
   let html='<div class="kv">';
   if(row){
     html+='<div class="k">Status</div><div class="v">'+dsPill(row.domain_status)+'</div>';
+    html+='<div class="k">Renew</div><div class="v">'+renewPill(row.renewal_status)+'</div>';
     html+='<div class="k">Expiry</div><div class="v">'+(fmtExpiry(row.expiry_date)||"Not set")+'</div>';
     if(row.apex?.ssl_issuer){
       html+='<div class="k">SSL Issuer</div><div class="v">'+row.apex.ssl_issuer+'</div>';
