@@ -92,9 +92,16 @@ class EnrichmentAdapter:
             "data": data or {},
         }
 
-    def _error(self, domain, message):
-        """Build a failure result dict."""
-        return {
+    def _error(self, domain, message, refresh_error=None):
+        """Build a failure result dict.
+
+        refresh_error: when set, the tag is added to the returned dict so the
+        persistence layer refuses to persist the row. Omitted entirely when falsy,
+        so a normal per-domain error row keeps its exact shape. EnrichmentAdapter
+        never sets it — per-domain adapters have no refresh step — but the parameter
+        exists so both adapter bases share one _error() signature (see dataset.py).
+        """
+        result = {
             "domain": domain,
             "adapter": self.name,
             "ok": False,
@@ -102,6 +109,9 @@ class EnrichmentAdapter:
             "fetched_at": datetime.utcnow().isoformat(),
             "data": {},
         }
+        if refresh_error:
+            result["refresh_error"] = refresh_error
+        return result
 
     # --- orchestration (do not override) --------------------------------
 

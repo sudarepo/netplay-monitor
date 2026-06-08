@@ -294,12 +294,13 @@ portfolio membership and scoring are engagement-scoped.
 
 ## Build history
 
-**Phase 1 — completed 2026-06-07.** Landed as three commits: (1) architecture
+**Phase 1 — completed 2026-06-07.** Landed as four commits: (1) architecture
 docs (this file), BUILD_BLUEPRINT.md, and pytest dev scaffolding; (2) the
 `EnrichmentAdapter` and `DatasetAdapter` bases plus the enrichment persistence
 layer (`schema.py`), with a 5-test suite covering the dataset base; (3) the
 multi-engagement schema migration (`engagements` table, composite-key `domains`
-rebuild with legacy backfill) and engagement-scoped CSV ingestion. Definition of
+rebuild with legacy backfill) and engagement-scoped CSV ingestion; and (4) this
+build history note. Definition of
 done met: create an engagement, import a customer CSV into it, query that
 engagement's domains from the DB; `DatasetAdapter` exists with tests passing.
 

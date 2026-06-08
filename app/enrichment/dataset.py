@@ -151,9 +151,16 @@ class DatasetAdapter:
             "data": data or {},
         }
 
-    def _error(self, domain, message):
-        """Build a failure result dict (same shape as EnrichmentAdapter._error)."""
-        return {
+    def _error(self, domain, message, refresh_error=None):
+        """Build a failure result dict (same shape as EnrichmentAdapter._error).
+
+        refresh_error: when set, tag the row so save_enrichment/save_enrichment_batch
+        refuse to persist it — an outage row carries no real per-domain data and
+        would clobber a prior good row under last-write-wins. Omitted when falsy, so
+        a normal per-domain lookup error keeps its exact shape. Mirrors
+        EnrichmentAdapter._error so the two bases share one signature.
+        """
+        result = {
             "domain": domain,
             "adapter": self.name,
             "ok": False,
@@ -161,6 +168,9 @@ class DatasetAdapter:
             "fetched_at": datetime.utcnow().isoformat(),
             "data": {},
         }
+        if refresh_error:
+            result["refresh_error"] = refresh_error
+        return result
 
     # --- download / scratch helpers -------------------------------------
 
@@ -315,13 +325,13 @@ class DatasetAdapter:
             err = f"dataset unavailable: {self.refresh_error}"
             done = 0
             for domain in domains:
-                row = self._error(domain, err)
-                # Tag every row of a failed-refresh batch as non-persistable. These
-                # rows carry no real per-domain data — they exist only to report the
-                # outage — and writing them would clobber prior good rows under
-                # save_enrichment's last-write-wins upsert. save_enrichment and
-                # save_enrichment_batch refuse to persist any row with this flag set.
-                row["refresh_error"] = self.refresh_error
+                # Tag every row of a failed-refresh batch as non-persistable via
+                # _error's refresh_error arg. These rows carry no real per-domain
+                # data — they exist only to report the outage — and writing them
+                # would clobber prior good rows under save_enrichment's
+                # last-write-wins upsert. save_enrichment and save_enrichment_batch
+                # refuse to persist any row with this flag set.
+                row = self._error(domain, err, refresh_error=self.refresh_error)
                 results.append(row)
                 done += 1
                 _fire(on_progress, done, total)
