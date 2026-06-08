@@ -3,6 +3,7 @@ import asyncio
 import csv
 import io
 import re
+import sqlite3
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime, timezone
@@ -264,13 +265,72 @@ async def api_delete_domain(domain: str):
     return {"ok": True}
 
 
+# --- Engagements ---
+
+@app.get("/api/engagements")
+async def api_list_engagements(include_archived: bool = True):
+    return db.list_engagements(include_archived=include_archived)
+
+
+@app.post("/api/engagements")
+async def api_create_engagement(request: Request):
+    payload = await request.json()
+    name = (payload.get("name") or "").strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "name is required"}, status_code=400)
+    slug = (payload.get("slug") or "").strip() or None
+    client = (payload.get("client") or "").strip() or None
+    notes = (payload.get("notes") or "").strip() or None
+    try:
+        eid = db.create_engagement(name, slug=slug, client=client, notes=notes)
+    except sqlite3.IntegrityError:
+        # slug is UNIQUE; a clash lands here.
+        return JSONResponse(
+            {"ok": False, "error": f"slug {slug!r} already exists"}, status_code=409
+        )
+    return {"ok": True, "id": eid}
+
+
+@app.get("/api/engagements/{engagement_id}")
+async def api_get_engagement(engagement_id: int):
+    eng = db.get_engagement(engagement_id)
+    if eng is None:
+        return JSONResponse({"ok": False, "error": "not found"}, status_code=404)
+    return eng
+
+
 @app.post("/api/domains/upload")
-async def api_upload(file: UploadFile):
+async def api_upload(engagement_id: int, file: UploadFile):
+    """Import a CSV of domains into one engagement's portfolio.
+
+    `engagement_id` is a REQUIRED query param. FastAPI 422s if it's missing or
+    non-int (fail-fast, mirroring the db-layer validation); we additionally verify
+    the engagement exists so a bad id returns a clean 404 rather than a per-row FK
+    error mid-import. There is no legacy-engagement default and no span-all path.
+
+    The CSV parsing reuses the existing helpers verbatim (delimiter auto-detect,
+    header detection, _normalize_domain, _parse_date_cell, _normalize_renewal).
+    Rows that can't be used are skipped AND reported per-line in `skipped`
+    (the prior single-portfolio importer skipped them silently).
+
+    Counts reflect what actually happened (re-imports are normal in the
+    engagement model, so these must not mislead):
+      added     - genuinely new rows (add_domain returned True)
+      duplicate - rows already present in this engagement (add_domain False)
+      updated   - existing rows that had expiry/renewal metadata (re)applied
+    """
+    if db.get_engagement(engagement_id) is None:
+        return JSONResponse(
+            {"ok": False, "error": f"engagement {engagement_id} not found"},
+            status_code=404,
+        )
+
     raw = await file.read()
     text = raw.decode("utf-8-sig", errors="replace")
     added = 0
     updated = 0
-    renewal_set = 0
+    duplicate = 0
+    skipped = []  # per-line skip reports: {"line": int, "reason": str}
 
     # Auto-detect delimiter from first non-empty line (tab / semicolon / comma).
     first_line = ""
@@ -283,21 +343,26 @@ async def api_upload(file: UploadFile):
     reader = csv.reader(io.StringIO(text), delimiter=delimiter)
     rows = list(reader)
     if not rows:
-        return {"ok": True, "added": 0, "updated": 0, "renewal_set": 0}
+        return {"ok": True, "added": 0, "updated": 0, "duplicate": 0, "skipped": []}
 
     # Try header-based parsing. If first row identifies a Domain column,
     # use header positions for everything and skip row 0 as data.
     header_map = _identify_columns(rows[0]) if rows else None
     data_rows = rows[1:] if header_map else rows
+    # 1-based file-line number for skip reports: header (row 0) consumes line 1.
+    line_offset = 2 if header_map else 1
 
-    for row in data_rows:
+    for i, row in enumerate(data_rows):
+        line_no = i + line_offset
         if not row:
+            skipped.append({"line": line_no, "reason": "empty row"})
             continue
 
         # Resolve the domain cell.
         if header_map:
             di = header_map["domain"]
             if di >= len(row):
+                skipped.append({"line": line_no, "reason": "row has no domain column"})
                 continue
             domain = _normalize_domain(row[di])
         else:
@@ -313,6 +378,7 @@ async def api_upload(file: UploadFile):
                         domain = _normalize_domain(col0 + "." + tld)
 
         if not domain:
+            skipped.append({"line": line_no, "reason": f"no parseable domain in {row!r}"})
             continue
 
         # Without headers, skip any row whose first cell is a known header label
@@ -320,6 +386,7 @@ async def api_upload(file: UploadFile):
         if not header_map:
             first_cell = _clean_cell(row[0]).lower()
             if first_cell in _HEADER_DOMAIN:
+                skipped.append({"line": line_no, "reason": "looks like a header row"})
                 continue
 
         # Resolve expiry.
@@ -343,18 +410,28 @@ async def api_upload(file: UploadFile):
             if ri < len(row):
                 renewal_status = _normalize_renewal(row[ri])
 
-        # Apply.
-        db.add_domain(domain)
-        if expiry_date:
-            db.set_expiry_date(domain, expiry_date)
-            updated += 1
-        else:
+        # Apply — engagement-scoped. add_domain's return distinguishes a genuinely
+        # new row from a re-import of one this engagement already holds.
+        was_new = db.add_domain(engagement_id, domain)
+        if was_new:
             added += 1
-        if renewal_status:
-            db.set_renewal_status(domain, renewal_status)
-            renewal_set += 1
+        else:
+            duplicate += 1
 
-    return {"ok": True, "added": added, "updated": updated, "renewal_set": renewal_set}
+        applied_meta = False
+        if expiry_date:
+            db.set_expiry_date(engagement_id, domain, expiry_date)
+            applied_meta = True
+        if renewal_status:
+            db.set_renewal_status(engagement_id, domain, renewal_status)
+            applied_meta = True
+        # "updated" = metadata (re)applied to an EXISTING row. Metadata landing on
+        # a row created this import is part of "added", not an update.
+        if applied_meta and not was_new:
+            updated += 1
+
+    return {"ok": True, "added": added, "updated": updated,
+            "duplicate": duplicate, "skipped": skipped}
 
 
 @app.post("/api/domains/{domain}/expiry")
