@@ -289,3 +289,43 @@ portfolio membership and scoring are engagement-scoped.
    `domain_metrics`. This is also where the Ahrefs go/no-go gets decided: if the
    free + cheap authority signals score well, Ahrefs stays parked.
 8. Multi-engagement schema refactor (Phase 1 of the original build plan).
+
+---
+
+## Build history
+
+**Phase 1 — completed 2026-06-07.** Landed as three commits: (1) architecture
+docs (this file), BUILD_BLUEPRINT.md, and pytest dev scaffolding; (2) the
+`EnrichmentAdapter` and `DatasetAdapter` bases plus the enrichment persistence
+layer (`schema.py`), with a 5-test suite covering the dataset base; (3) the
+multi-engagement schema migration (`engagements` table, composite-key `domains`
+rebuild with legacy backfill) and engagement-scoped CSV ingestion. Definition of
+done met: create an engagement, import a customer CSV into it, query that
+engagement's domains from the DB; `DatasetAdapter` exists with tests passing.
+
+**Deliberate deferrals and follow-ups.** The UI-facing domain endpoints in
+`app/main.py` (delete, set_expiry, set_renewal, mark_renewed, results, export,
+execute_run, add/clear domains) were **left on their old single-portfolio
+signatures by design** — they raise `ValueError` when called until the deferred
+UI rework updates them. This is intentional, not an oversight; do not "fix"
+them piecemeal ahead of that rework. `curlie.py` is deferred while the
+LRZ-hosted dump endpoint is down (on probation pending a Phase 2 reachability
+test — see the Curlie availability note above; the stack proceeds without it if
+it stays unreachable). Phase 2 also folds the `refresh_error` row tag into
+`_error()` so both adapter bases change together. Security follow-up:
+**inherited netplay-monitor deploy bearer token committed in `app/main.py`**
+(the `/api/deploy` endpoint) — needs rotation and a git history scrub before
+the next deploy. The repo (`sudarepo/netplay-monitor`) was confirmed **public**
+on GitHub on 2026-06-07 (`"private": false` via the API), so treat this as
+urgent, not hygiene.
+
+**Phase 5 validation data — received 2026-06-07.** The real DTI portfolio CSV
+has been provided by the client and is broader than originally scoped: **1700
+domains** rather than the ~572 from the original engagement scope. A stratified
+**500-domain test batch** (`DTI_500_Test_Domains.csv`) was prepared for
+first-run validation. As of this commit both CSVs exist only in the upload
+context they arrived in and have **not been transferred to local storage**;
+staging them outside the repo (e.g. `~/Domain_Options/clients/dti/`) is a
+Phase 5 prerequisite. The 500-domain batch will validate the pipeline
+end-to-end and measure actual per-source enrichment cost before any decision
+on full-portfolio scaling.
