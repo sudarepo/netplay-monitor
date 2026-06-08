@@ -1,0 +1,7 @@
+# Development-only dependencies (test tooling, etc.).
+# Runtime deps live in requirements.txt and are NOT duplicated here.
+# For a dev environment, install both:
+#   pip install -r requirements.txt -r requirements-dev.txt
+-r requirements.txt
+
+pytest==8.3.3

@@ -17,6 +17,7 @@ htpasswd
 data/*.db
 data/*.sqlite
 data/*.sqlite3
+data/datasets/
 
 # Logs
 *.log
