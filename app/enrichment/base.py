@@ -20,6 +20,7 @@ its env var via API_KEY_ENV.
 """
 import asyncio
 import os
+import random
 from datetime import datetime
 
 import httpx
@@ -59,10 +60,15 @@ class EnrichmentAdapter:
 
     def __init__(self, api_key=None):
         self.api_key = api_key or os.environ.get(self.API_KEY_ENV, "")
-        if not self.api_key:
+        # One-shot guard so _punycode logs its first encoding failure but not one
+        # line per malformed domain across a large portfolio (cf. keyless warning).
+        self._punycode_warned = False
+        if self.API_KEY_ENV and not self.api_key:
             # Not fatal at construction — let the run surface auth errors per
             # domain so a missing key produces clean ok=False rows rather than a
-            # crash. But make the misconfiguration obvious in logs.
+            # crash. But make the misconfiguration obvious in logs. Guarded on
+            # API_KEY_ENV so keyless adapters (archiveorg, wikipedia, dataset
+            # sources) don't emit a spurious warning for a key they never need.
             print(f"[{self.name}] warning: no API key (set {self.API_KEY_ENV})")
 
     # --- subclass hooks -------------------------------------------------
@@ -112,6 +118,98 @@ class EnrichmentAdapter:
         if refresh_error:
             result["refresh_error"] = refresh_error
         return result
+
+    # --- request helpers (shared by all per-domain adapters) ------------
+
+    def _punycode(self, domain):
+        """Return the IDNA/punycode ASCII form of a normalized domain for use in
+        external API calls.
+
+        db._normalize() lowercases and strips scheme/www/path but does NOT
+        punycode-encode, so a Unicode IDN (café.com, Cyrillic/CJK names) reaches
+        adapters in Unicode form — which the Wayback CDX index and most provider
+        APIs key by xn-- ASCII. This converts it; pure-ASCII domains pass through
+        unchanged.
+
+        Best-effort by design: on ANY encoding failure (malformed IDN, codec edge
+        case, over-long label) it returns the input UNCHANGED and lets the
+        downstream API decide whether to accept or reject it — the adapter's job is
+        to try, not to refuse. It never raises. The first failure per adapter
+        instance is logged for later audit; subsequent failures are suppressed to
+        avoid one log line per bad domain across a large portfolio (same posture as
+        the keyless-key warning). The blanket except mirrors _guarded's
+        catch-everything-at-the-boundary stance in this same module.
+        """
+        try:
+            return domain.encode("idna").decode("ascii")
+        except Exception as e:
+            if not self._punycode_warned:
+                self._punycode_warned = True
+                print(f"[{self.name}] warning: IDNA encoding failed for {domain!r} "
+                      f"({type(e).__name__}); passing through unchanged "
+                      f"(further such failures suppressed)")
+            return domain
+
+    async def _get_with_retries(self, client, url, *, params=None, headers=None,
+                                max_retries=3, base_delay=1.0,
+                                retry_statuses=(429, 503)):
+        """GET with bounded exponential-backoff-with-jitter retries.
+
+        Shared by per-domain adapters because the free sources (Wayback, Wikipedia,
+        ...) throttle under load with no documented limit. Retries on the given HTTP
+        status codes (default 429/503) and on transient transport errors (timeouts,
+        connection resets). Honors an integer-seconds Retry-After header when present
+        (capped at RETRY_AFTER_CAP so a hostile or absurd value can't stall a run).
+
+        After max_retries is exhausted it RETURNS the final Response rather than
+        raising on a still-throttled status — so the caller maps it to a typed
+        ok=False reason (e.g. "rate_limited after N retries"). A transport error on
+        the final attempt propagates and is caught by _guarded().
+
+        Jitter is load-bearing, not cosmetic: without it, the N concurrent tasks
+        that all hit a 429 at the same instant back off to the SAME future moment
+        and thundering-herd the server again. The additive random term decorrelates
+        their wake-ups:
+            delay = base_delay * 2**attempt + random.uniform(0, base_delay)
+        """
+        last_resp = None
+        for attempt in range(max_retries + 1):
+            # 1 initial attempt + max_retries additional retries = max_retries + 1 total
+            try:
+                last_resp = await client.get(url, params=params, headers=headers)
+            except (httpx.TimeoutException, httpx.TransportError):
+                if attempt == max_retries:
+                    raise                          # exhausted -> _guarded handles
+                await asyncio.sleep(self._backoff(attempt, base_delay))
+                continue
+            if last_resp.status_code in retry_statuses and attempt < max_retries:
+                await asyncio.sleep(
+                    self._retry_after(last_resp) or self._backoff(attempt, base_delay)
+                )
+                continue
+            return last_resp
+        return last_resp
+
+    # Cap prevents await asyncio.sleep on a pathological Retry-After (e.g. 86400)
+    # from stalling a whole run.
+    RETRY_AFTER_CAP = 30.0
+
+    @staticmethod
+    def _backoff(attempt, base_delay):
+        """Exponential backoff with additive jitter (see _get_with_retries)."""
+        return base_delay * (2 ** attempt) + random.uniform(0, base_delay)
+
+    def _retry_after(self, resp):
+        """Parse an integer-seconds Retry-After header, capped at RETRY_AFTER_CAP.
+        None if absent or not a plain integer (HTTP-date form is ignored — Wayback
+        uses seconds)."""
+        raw = resp.headers.get("retry-after")
+        if not raw:
+            return None
+        try:
+            return min(float(int(raw)), self.RETRY_AFTER_CAP)
+        except ValueError:
+            return None
 
     # --- orchestration (do not override) --------------------------------
 
