@@ -109,11 +109,14 @@ work and it's contained. Setup friction is the main variable.
 6. **`seokicks.py`** (paid, per-domain) — Domain Pop (domainpop/linkpop/ippop/netpop).
    `appid` param, credit-metered.
 7. **`majestic_million.py`** (free, dataset) — daily CSV → global-rank lookup.
-8. **`curlie.py`** (free, dataset) — monthly TSV dump → boolean listed/not-listed.
+8. **`ahrefs.py`** (paid, per-domain) — authority / backlinks: Domain Rating,
+   referring-domain / backlink counts. $249/mo Standard floor; API key in hand
+   2026-06-09. Built LAST, after the cheaper authority signals ship, so the
+   original triangulation question informs its design.
 
 Each adapter: write client → run against live source → reconcile real response →
 handle errors/edge cases → confirm stored fields. The free per-domain ones (1–2)
-are quick. The credit-metered (4, 6) and dataset (7, 8) ones take longer.
+are quick. The credit-metered (4, 6, 8) and the dataset one (7) take longer.
 
 **Definition of done:** each adapter, run against its live source for a sample of
 ~20 real domains, writes correct rows to the `enrichment` table with `ok=True` and
@@ -121,7 +124,8 @@ the expected fields populated; failures produce clean `ok=False` rows, not crash
 
 **Estimate: 3 – 4.5 days.** Roughly: free per-domain pair ~0.5d; three core API
 adapters ~1.5–2d (live-response reconciliation is the time sink); SeoKicks ~0.5d;
-two dataset adapters ~1d. This is the phase most exposed to live-API surprises.
+the one dataset adapter ~0.5d; Ahrefs ~0.5d. This is the phase most exposed to
+live-API surprises.
 
 **Risk:** medium. Any single provider behaving oddly (auth quirk, undocumented rate
 limit, messy response) can add half a day. The estimate assumes no provider is
@@ -151,7 +155,7 @@ thresholds against real output.
 |-----------|-----------|-------|
 | Value | Estibot valuation (+ NameBio comps later) | Log-scaled; $0–$50 → low, $5k+ → high |
 | Authority | Majestic Million rank, SEOkicks domain pop, Wikipedia links | Triangulated; any one strong signal lifts it |
-| Provenance / age | WhoXY first-registered year, Archive.org first-seen + crawl count, Curlie listed | Older + long archive history + Curlie = high |
+| Provenance / age | WhoXY first-registered year, Archive.org first-seen + crawl count | Older + long archive history = high |
 | Usage / technical | DomScan health + reputation, existing checker (apex/www resolves) | Actively resolving & healthy = high; dead = low |
 | Defensive / brand | DomScan TLD-count, name characteristics | High TLD coverage suggests a defended brand asset |
 
@@ -179,8 +183,10 @@ decision, not just a score:
 exceeds a threshold fraction of its estimated value — the "you're paying $X/yr to
 hold a $Y domain" finding that drives the savings number in the deliverable.
 
-**Asymmetric signals (from PROJECT.md):** Curlie present = positive, absent =
-neutral (never a penalty). Same logic for any low-recall signal.
+**Asymmetric signals (from PROJECT.md):** for high-specificity / low-recall
+signals — those that strongly indicate quality when present but don't reliably
+indicate absence-of-quality when missing — score present = positive, absent =
+neutral (never a penalty).
 
 ### Definition of done
 
@@ -278,16 +284,14 @@ Within Phase 2, adapters are independent and can be built in any order.
 
 - **Before Phase 1:** the Mac, set up; the repo accessible.
 - **Before Phase 2:** all access gathered — Estibot/WhoXY/DomScan confirmed working,
-  SeoKicks `appid`, and confirmation that the Majestic Million CSV and Curlie TSV
-  download URLs are reachable. *Gathering these during Phase 1 keeps Phase 2 unblocked.*
+  SeoKicks `appid`, and confirmation that the Majestic Million CSV download URL is
+  reachable. *Gathering these during Phase 1 keeps Phase 2 unblocked.*
 - **Before Phase 3:** your own clear sense of how you triage a portfolio — the model
   is a draft and you'll be correcting it live, so the faster you can react to output,
   the faster this phase goes.
 - **Before Phase 5:** the Domain Tech Investments portfolio CSV, and the written
   permission to use it as the case study (the "CONFIRM THIS WEEK" item from the
   marketing plan).
-- **Before Phase 6:** confirm the Curlie attribution requirement if Curlie data will
-  appear in the deliverable (the license note from PROJECT.md).
 
 ---
 

@@ -29,9 +29,10 @@ results. Scoring and tiering read from the stored enrichment data.
 ## Enrichment stack
 
 The stack spans two adapter *types* (see "Two adapter types" below). Three core
-API adapters carry confirmed access; five additional sources are being onboarded
-(access info in progress). Together they cover valuation, registration/provenance,
-technical health, authority/backlinks, age/activity, and directory trust.
+API adapters carry confirmed access; four additional sources are being onboarded
+(access info in progress), plus Ahrefs (confirmed; built last — see below).
+Together they cover valuation, registration/provenance, technical health,
+authority/backlinks, and age/activity.
 
 ### Core API adapters — confirmed access
 
@@ -49,16 +50,19 @@ technical health, authority/backlinks, age/activity, and directory trust.
 | `wikipedia`  | per-domain API | Number of links from Wikipedia | MediaWiki `list=exturlusage`, no key | Free |
 | `majestic_million` | **dataset** | Majestic Million global rank + TLD rank | Daily CSV download, no key | Free |
 | `seokicks`   | per-domain API | Domain Pop (domainpop / linkpop / ippop / netpop) | `appid` param, XML/JSON | €9.90/mo |
-| `curlie`     | **dataset** | Listed in the Curlie web directory (human-edited; a real editorial-merit signal) | TSV tar/gzip dump (~200MB), monthly, no key | Free |
+| `ahrefs`     | per-domain API | Authority / backlinks (Domain Rating, referring-domain / backlink counts) | API key | $249/mo Standard floor |
+
+### Ahrefs — confirmed, built last
+
+`ahrefs` (authority / backlinks, $249/mo Standard floor) is **confirmed for the
+stack** (API key in hand 2026-06-09), slotted as the **final adapter (#8)**. It is
+built only after the cheaper authority signals (Majestic Million rank, SEOkicks
+Domain Pop, Wikipedia links, Archive.org activity) ship, so the original
+triangulation question — do several independent low-cost indices make Ahrefs'
+cost unnecessary? — still informs how much scoring leans on it.
 
 ### Parked — re-evaluate later
 
-- `ahrefs` (authority / backlinks, $249 Standard-tier floor). **Pulled from the
-  active stack.** Decision deferred until we see how the cheaper authority signals
-  (Majestic Million rank, SEOkicks Domain Pop, Wikipedia links, Archive.org
-  activity) perform in real audits. The working hypothesis: triangulating several
-  independent low-cost indices may make Ahrefs' cost unjustifiable. Revisit only
-  if those signals prove insufficient.
 - `namebio` (comparable sales — **sequential only**, ≤30 req/min, no
   multi-threading). Additive when ready.
 
@@ -67,6 +71,11 @@ technical health, authority/backlinks, age/activity, and directory trust.
 - `dotdb` — API access lapsed and renewal is not cost-justified. Its one needed
   parameter (number of TLDs a name is registered in) is now served by `domscan`'s
   bulk `/status` availability check across the popular TLDs.
+- `curlie` — directory-listed signal. **Removed 2026-06-09** (not deferred): its
+  dump is hosted on an LRZ bucket (`vm-138-246-238-70.cloud.mwn.de:9000`) that
+  refused connections across three reachability checks (first 2026-06-02). A
+  high-specificity / low-recall bonus signal — never a baseline axis — so its
+  maintenance overhead exceeded its value. Not to be re-probed.
 
 Each adapter's concurrency cap is conservative by default. Tune per the provider's
 documented rate limits once tested against live keys. DomScan and SEOkicks are
@@ -82,16 +91,13 @@ expanded stack adds a second pattern, so the architecture supports both.
 **1. Per-domain API adapters** (`EnrichmentAdapter`, `app/enrichment/base.py`).
 One HTTP request per domain, run concurrently under a semaphore. This is the
 original pattern: `estibot`, `whoxy`, `domscan`, `archiveorg`, `wikipedia`,
-`seokicks`. Subclasses implement `enrich_one()`.
+`seokicks`, `ahrefs`. Subclasses implement `enrich_one()`.
 
 **2. Dataset adapters** (`DatasetAdapter` — to build). Some sources publish a
 whole-corpus dataset that is far cheaper to download once and query locally than
-to hit per-domain. Two confirmed cases:
+to hit per-domain. One confirmed case:
 
 - **Majestic Million** — ~1M-row CSV, daily, free, no key. Yields global rank.
-- **Curlie** — TSV (tar/gzip, ~200MB), monthly, free, no key. ~2.9M human-edited
-  entries; per entry: URL, title, editorial description, full category path. The
-  lookup is a boolean: is this domain present in the directory.
 
 Contract:
 
@@ -112,34 +118,6 @@ free.
 delete, re-download next day" cycle is fine. Dataset refreshes write to a scratch
 location, get queried, and can be discarded — no need to retain corpora between
 runs.
-
-**Curlie — notes for the build and scoring layers:**
-
-- *License.* Curlie data carries a Creative Commons Attribution license (inherited
-  from the original ODP terms). Internal use — scoring, analysis — is fine with no
-  action. But if "listed in Curlie" is **surfaced in a client-facing deliverable**,
-  confirm the attribution requirement and, if needed, add a one-line credit/footnote
-  to the report. Decide this before Curlie data appears in any deliverable, not after.
-- *Low recall — score asymmetrically.* Curlie has ~2.9M entries against hundreds of
-  millions of active domains, and skews toward established content sites. The
-  portfolios we audit lean parked / brandable / domainer-held, so **most domains
-  will not be listed**. This makes Curlie a high-specificity, low-recall signal:
-  present = a strong, hard-to-fake editorial-merit marker (meaningful positive);
-  absent = tells us almost nothing (treat as **neutral, never a penalty**). It is a
-  bonus signal that adds confidence on the rare hits, not a baseline scoring axis.
-- *Availability — on probation.* The Curlie dump is **not hosted by Curlie**: the
-  `https://curlie.org/directory-dl` link redirects to a bucket on LRZ (Leibniz
-  Supercomputing Centre) infrastructure — `vm-138-246-238-70.cloud.mwn.de:9000`,
-  the file being `curlie-rdf-all.tar.gz`. During the Phase 1 build (2026-06-02)
-  that endpoint was **down**: DNS resolved and `curlie.org:443` was up, but the
-  bucket port refused connections (confirmed with the sandbox disabled, so not a
-  local network artifact). Majestic Million was reachable the same day. Curlie is
-  therefore **on probation pending a Phase 2 reachability test**: build `curlie.py`
-  only once the dump downloads cleanly. If it stays unreachable, the stack proceeds
-  without it — Curlie is a bonus signal, never a baseline axis (see the low-recall
-  note above), so its absence is not a blocker. The `DatasetAdapter` base is built
-  to handle exactly this: a download failure becomes a clean `ok=False` batch +
-  `refresh_error`, leaving the halt-vs-skip decision to the orchestration layer.
 
 ---
 
@@ -258,7 +236,7 @@ portfolio membership and scoring are engagement-scoped.
 - **Config / secrets:** `os.environ.get(...)`. API keys never hardcoded, never
   committed. Each adapter reads its key from a documented env var:
   `ESTIBOT_API_KEY`, `WHOXY_API_KEY`, `DOMSCAN_API_KEY`, `SEOKICKS_APP_ID`.
-  Archive.org, Wikipedia, Majestic Million, and Curlie need no key.
+  Archive.org, Wikipedia, and Majestic Million need no key.
 - **No secrets in the repo.** `.env` is gitignored; document required vars in the
   adapter docstring.
 - **Thin adapters, fat scoring.** Adapters fetch and normalize. They do not score,
@@ -276,18 +254,18 @@ portfolio membership and scoring are engagement-scoped.
 1. `base.py` — per-domain adapter contract + orchestration. (done)
 2. `schema.py` — enrichment table + migrations. (done)
 3. `dataset.py` — `DatasetAdapter` base (download → local lookup → discard).
-   (to build — needed before Majestic Million / Curlie)
+   (to build — needed before Majestic Million)
 4. Core API clients, built from docs and field-confirmed against live responses
    on the Mac: `estibot.py`, `whoxy.py`, `domscan.py` (DomScan also yields the
    TLD-count parameter via bulk `/status`).
 5. Free per-domain clients: `archiveorg.py` (CDX crawl count + first-seen),
    `wikipedia.py` (`exturlusage` link count).
 6. `majestic_million.py` (dataset: daily CSV → rank lookup). `seokicks.py`
-   (per-domain Domain Pop). `curlie.py` (dataset: monthly TSV dump → boolean
-   listed/not-listed lookup).
+   (per-domain Domain Pop). `ahrefs.py` (per-domain authority/backlinks) is built
+   LAST — after the cheaper authority signals — so its design is informed by how
+   they performed (the original triangulation question).
 7. Scoring layer — composite score + A–E tiering, reads `enrichment`, writes
-   `domain_metrics`. This is also where the Ahrefs go/no-go gets decided: if the
-   free + cheap authority signals score well, Ahrefs stays parked.
+   `domain_metrics`.
 8. Multi-engagement schema refactor (Phase 1 of the original build plan).
 
 ---
@@ -309,11 +287,16 @@ engagement's domains from the DB; `DatasetAdapter` exists with tests passing.
 execute_run, add/clear domains) were **left on their old single-portfolio
 signatures by design** — they raise `ValueError` when called until the deferred
 UI rework updates them. This is intentional, not an oversight; do not "fix"
-them piecemeal ahead of that rework. `curlie.py` is deferred while the
-LRZ-hosted dump endpoint is down (on probation pending a Phase 2 reachability
-test — see the Curlie availability note above; the stack proceeds without it if
-it stays unreachable). Phase 2 also folds the `refresh_error` row tag into
-`_error()` so both adapter bases change together. Security follow-up:
+them piecemeal ahead of that rework. **Curlie was evaluated and removed from the
+build (2026-06-09)** — not deferred: its LRZ-hosted dump
+(`vm-138-246-238-70.cloud.mwn.de:9000`) refused connections across three
+reachability checks (first 2026-06-02), and as a high-specificity / low-recall
+bonus signal (never a baseline axis) its maintenance overhead exceeded its value;
+it will not be re-probed. **Ahrefs moved from parked to confirmed (2026-06-09,
+API key in hand)** and slots in as the final adapter (#8), built after the cheaper
+authority signals so the original triangulation question still informs its design.
+Phase 2 also folds the `refresh_error` row tag into `_error()` so both adapter
+bases change together. Security follow-up:
 **inherited netplay-monitor deploy bearer token committed in `app/main.py`**
 (the `/api/deploy` endpoint) — needs rotation and a git history scrub before
 the next deploy. The repo (`sudarepo/netplay-monitor`) was confirmed **public**
