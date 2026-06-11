@@ -55,11 +55,12 @@ authority/backlinks, and age/activity.
 ### Ahrefs — confirmed, built last
 
 `ahrefs` (authority / backlinks, $249/mo Standard floor) is **confirmed for the
-stack** (API key in hand 2026-06-09), slotted as the **final adapter (#8)**. It is
-built only after the cheaper authority signals (Majestic Million rank, SEOkicks
-Domain Pop, Wikipedia links, Archive.org activity) ship, so the original
-triangulation question — do several independent low-cost indices make Ahrefs'
-cost unnecessary? — still informs how much scoring leans on it.
+stack** — **Standard-tier API key acquired 2026-06-09 ($249/mo, full API
+access); ready to design when the sequence reaches it** — slotted as the **final
+adapter (#8)**. It is built only after the cheaper authority signals (Majestic
+Million rank, SEOkicks Domain Pop, Wikipedia links, Archive.org activity) ship,
+so the original triangulation question — do several independent low-cost indices
+make Ahrefs' cost unnecessary? — still informs how much scoring leans on it.
 
 ### Parked — re-evaluate later
 
@@ -303,13 +304,24 @@ the next deploy. The repo (`sudarepo/netplay-monitor`) was confirmed **public**
 on GitHub on 2026-06-07 (`"private": false` via the API), so treat this as
 urgent, not hygiene.
 
-**Phase 5 validation data — received 2026-06-07.** The real DTI portfolio CSV
-has been provided by the client and is broader than originally scoped: **1700
-domains** rather than the ~572 from the original engagement scope. A stratified
-**500-domain test batch** (`DTI_500_Test_Domains.csv`) was prepared for
-first-run validation. As of this commit both CSVs exist only in the upload
-context they arrived in and have **not been transferred to local storage**;
-staging them outside the repo (e.g. `~/Domain_Options/clients/dti/`) is a
-Phase 5 prerequisite. The 500-domain batch will validate the pipeline
-end-to-end and measure actual per-source enrichment cost before any decision
-on full-portfolio scaling.
+**Phase 5 validation data — received 2026-06-07; test batch expanded
+2026-06-09.** The real DTI portfolio CSV has been provided by the client and is
+broader than originally scoped: **1700 domains** rather than the ~572 from the
+original engagement scope. First-run validation initially used a stratified
+**500-domain test batch**; on **2026-06-09**, per client request, that batch was
+replaced by an expanded **800-domain priority list**
+(`DTI_Test_800_Domains.csv`). The original 500 was archived as
+`DTI_500_Test_Domains_archived_2026-06-09.csv`.
+
+**The two batches have different sampling bases — do not conflate them.** The
+original 500 was a *stratified sample* (mirrors portfolio composition); the 800
+is a *priority selection by the client* (reflects DTI's judgment of value). Phase
+5 scoring distribution from the 800 therefore reflects DTI's judgment of value,
+not portfolio composition — keep this in mind when interpreting Phase 5 results.
+
+All three CSVs are now staged locally at `~/Domain_Options/clients/dti/`:
+`DTI_Domains.csv` (full ~1700-domain portfolio, unchanged reference),
+`DTI_Test_800_Domains.csv` (800-domain priority list), and
+`DTI_500_Test_Domains_archived_2026-06-09.csv` (archived stratified batch). The
+800-domain batch will validate the pipeline end-to-end and measure actual
+per-source enrichment cost before any decision on full-portfolio scaling.
