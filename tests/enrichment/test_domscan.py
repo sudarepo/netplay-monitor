@@ -7,12 +7,21 @@ GETs per enrich_one in order — call 1 = /health, call 2 = /reputation, call 3 
 each test assert exactly how many axes were attempted (the 402/429/transport
 short-circuits stop early).
 
+Field shapes are reconciled against the LIVE DomScan API (verified 2026-06-19):
+  /health      -> {"health_score":int, "grade":str, "health_checks":[...]}
+  /reputation  -> {"reputation_score":int, "grade":str, "risk_level":str, "factors":{...}}
+  /status      -> {"name":str, "results":[{"available":bool, "lifecycle_phase":str,
+                   "registry_status":[...]}]}   (RDAP per-domain registration check;
+                   the old multi-TLD "tld_count" fan-out was a wrong guess — that
+                   endpoint does not exist as assumed; status now yields registration
+                   status + lifecycle + registry lock flags from results[0].)
+
 These cover: the three independent axes (no inter-endpoint gating); local degradation
 (one axis fails -> its fields None, ok=True); the all-axes-fail guard (-> ok=False, not
 an all-None "measurement"); the typed-402 in-adapter HARD-STOP (token + latch + the
 no-HTTP short-circuit on the next domain); 429-aborts-whole-domain vs 5xx-degrades;
-the single-attempt discipline (no retry helper); the None != 0 discipline; and the two
-corrections — tlds_checked falls back to None when absent, and the x-api-key header.
+the single-attempt discipline (no retry helper); the None != 0 discipline; and the
+x-api-key header.
 
 Async is driven with asyncio.run(), matching the other adapter test files. No
 asyncio.sleep monkeypatch is needed — domscan does not use _get_with_retries, so there
@@ -67,23 +76,30 @@ def _adapter():
 
 
 def _health_ok(**over):
-    body = {"health_score": 82, "health_grade": "B",
-            "health_checks": {"dns": "ok", "http": "ok"}}
+    # Live shape: grade (not health_grade); health_checks is a LIST of check dicts.
+    body = {"health_score": 82, "grade": "B",
+            "health_checks": [{"category": "DNS", "name": "A Record", "passed": True}]}
     body.update(over)
     return body
 
 
 def _rep_ok(**over):
-    body = {"reputation_score": 70, "reputation_grade": "B", "risk_level": "low",
-            "grade_capped_by_parking": False, "reputation_factors": {"blacklists": 0}}
+    # Live shape: grade (not reputation_grade); factors (not reputation_factors);
+    # NO grade_capped_by_parking field.
+    body = {"reputation_score": 70, "grade": "B", "risk_level": "low",
+            "factors": {"blacklists": {"score": 100, "weight": 0.15}}}
     body.update(over)
     return body
 
 
-def _status_ok(**over):
-    body = {"tld_count": 3, "tlds_registered": ["com", "net", "org"], "tlds_checked": 50}
-    body.update(over)
-    return body
+def _status_ok(available=False, lifecycle_phase="active",
+               registry_status=("client transfer prohibited",), name="example"):
+    # Live shape: {"name":..., "results":[{available, lifecycle_phase, registry_status}]}.
+    return {"name": name, "results": [{
+        "domain": f"{name}.com", "available": available,
+        "lifecycle_phase": lifecycle_phase,
+        "registry_status": list(registry_status),
+    }]}
 
 
 def _credit_402():
@@ -105,9 +121,10 @@ def test_domscan_happy_all_three():
     d = row["data"]
     assert d["health_score"] == 82 and d["health_grade"] == "B"
     assert d["reputation_score"] == 70 and d["risk_level"] == "low"
-    assert d["grade_capped_by_parking"] is False
-    assert d["tld_count"] == 3 and d["tlds_registered"] == ["com", "net", "org"]
-    assert d["tlds_checked"] == 50
+    assert d["reputation_grade"] == "B"
+    assert d["registered"] is True                 # available=False -> registered=True
+    assert d["lifecycle_phase"] == "active"
+    assert d["registry_status"] == ["client transfer prohibited"]
     assert client.calls == 3
 
 
@@ -123,7 +140,7 @@ def test_domscan_health_degrades_local():
     assert d["health_score"] is None and d["health_grade"] is None
     assert d["health_checks"] is None
     assert d["reputation_score"] == 70        # sibling axis preserved
-    assert d["tld_count"] == 3
+    assert d["registered"] is True
     assert client.calls == 3
 
 
@@ -135,8 +152,9 @@ def test_domscan_reputation_degrades_local():
     assert row["ok"] is True
     d = row["data"]
     assert d["reputation_score"] is None and d["risk_level"] is None
-    assert d["grade_capped_by_parking"] is None    # axis failed -> None, not False
-    assert d["health_score"] == 82 and d["tld_count"] == 3
+    assert d["reputation_grade"] is None           # axis failed -> None
+    assert d["reputation_factors"] is None
+    assert d["health_score"] == 82 and d["registered"] is True
     assert client.calls == 3
 
 
@@ -147,8 +165,8 @@ def test_domscan_status_degrades_local():
     row = _run(_adapter().enrich_one(client, "example.com"))
     assert row["ok"] is True
     d = row["data"]
-    assert d["tld_count"] is None and d["tlds_registered"] is None
-    assert d["tlds_checked"] is None
+    assert d["registered"] is None and d["lifecycle_phase"] is None
+    assert d["registry_status"] is None
     assert d["health_score"] == 82
     assert client.calls == 3
 
@@ -261,26 +279,39 @@ def test_domscan_none_not_zero_discipline():
     # None. The two must never collapse.
     client = _FakeClient([_resp(200, _health_ok(health_score=0)),
                           _resp(500),                       # reputation axis fails
-                          _resp(200, _status_ok(tld_count=0, tlds_registered=[]))])
+                          _resp(200, _status_ok())])
     row = _run(_adapter().enrich_one(client, "example.com"))
     d = row["data"]
     assert d["health_score"] == 0             # measured zero, preserved
     assert d["reputation_score"] is None      # failed axis, unknown
-    assert d["tld_count"] == 0                # measured zero TLDs, preserved
-    assert d["tlds_registered"] == []
+    assert d["registered"] is True            # status axis still measured
 
 
-def test_domscan_tlds_checked_absent_is_none():
-    # Correction (B): when tlds_checked is absent, fall back to None — NOT
-    # len(CURATED_TLDS). tld_count still derives from the registered list length.
+def test_domscan_status_available_means_not_registered():
+    # available=True -> registered=False (a genuinely available/unregistered domain).
     client = _FakeClient([_resp(200, _health_ok()),
                           _resp(200, _rep_ok()),
-                          _resp(200, {"tlds_registered": ["com", "net"]})])
+                          _resp(200, _status_ok(available=True, lifecycle_phase="available",
+                                                registry_status=()))])
     row = _run(_adapter().enrich_one(client, "example.com"))
     d = row["data"]
-    assert d["tlds_checked"] is None
-    assert d["tld_count"] == 2                 # len of the registered list
-    assert d["tlds_registered"] == ["com", "net"]
+    assert d["registered"] is False           # available -> NOT registered
+    assert d["lifecycle_phase"] == "available"
+    assert d["registry_status"] == []
+
+
+def test_domscan_status_missing_results_is_none():
+    # /status 200 but no results array (or empty) -> status fields None, ok=True
+    # (health + reputation still measured). Never fabricate a registration status.
+    client = _FakeClient([_resp(200, _health_ok()),
+                          _resp(200, _rep_ok()),
+                          _resp(200, {"name": "example", "results": []})])
+    row = _run(_adapter().enrich_one(client, "example.com"))
+    d = row["data"]
+    assert d["registered"] is None and d["lifecycle_phase"] is None
+    assert d["registry_status"] is None
+    assert d["health_score"] == 82            # siblings preserved -> ok=True
+    assert row["ok"] is True
 
 
 def test_domscan_headers_carry_x_api_key():
@@ -288,13 +319,3 @@ def test_domscan_headers_carry_x_api_key():
     h = _adapter()._headers()
     assert h["x-api-key"] == "test-key"
     assert "User-Agent" in h                   # base headers still present
-
-
-def test_domscan_grade_capped_false_preserved():
-    # grade_capped_by_parking is a bool: a measured False is preserved (only a FAILED
-    # reputation axis makes it None).
-    client = _FakeClient([_resp(200, _health_ok()),
-                          _resp(200, _rep_ok(grade_capped_by_parking=True)),
-                          _resp(200, _status_ok())])
-    row = _run(_adapter().enrich_one(client, "example.com"))
-    assert row["data"]["grade_capped_by_parking"] is True

@@ -178,7 +178,7 @@ class DomscanAdapter(EnrichmentAdapter):
 
         # --- Axis 3: status / TLD-count (one name x ~50 TLDs, one credit) ----
         payload, st = await self._call(
-            client, "/status", {"domain": label, "tlds": ",".join(self.CURATED_TLDS)},
+            client, "/status", {"domain": ascii_domain},  # full domain; /status is per-domain RDAP
         )
         if st == "halt":
             return self._halt_result(domain)
@@ -259,39 +259,45 @@ class DomscanAdapter(EnrichmentAdapter):
             return {"health_score": None, "health_grade": None, "health_checks": None}
         return {
             "health_score": _as_int(payload.get("health_score")),
-            "health_grade": payload.get("health_grade") or None,
+            "health_grade": payload.get("grade") or None,        # live field is "grade"
             "health_checks": payload.get("health_checks") or None,
         }
 
     def _extract_reputation(self, payload):
         keys = ("reputation_score", "reputation_grade", "risk_level",
-                "grade_capped_by_parking", "reputation_factors")
+                "reputation_factors")
         if not isinstance(payload, dict):
             return {k: None for k in keys}
         return {
             "reputation_score": _as_int(payload.get("reputation_score")),
-            "reputation_grade": payload.get("reputation_grade") or None,
+            "reputation_grade": payload.get("grade") or None,        # live field is "grade"
             "risk_level": payload.get("risk_level") or None,
-            # bool: keep a measured False; None ONLY when the axis itself failed (above).
-            "grade_capped_by_parking": payload.get("grade_capped_by_parking"),
-            "reputation_factors": payload.get("reputation_factors") or None,
+            "reputation_factors": payload.get("factors") or None,    # live field is "factors"
         }
 
     def _extract_status(self, payload):
+        # REPURPOSED (was a TLD-count fan-out): the live /status endpoint is a per-domain
+        # RDAP registration check, NOT a multi-TLD breadth count. It returns
+        # {"name":..., "results":[{domain, available, status, lifecycle_phase,
+        # registry_status:[...]}]} -- the fields live one level down in results[0]. We
+        # surface authoritative registration status + lifecycle + lock flags (a signal
+        # whoxy doesn't expose). The old TLD-count signal needs a different approach and
+        # is deferred (see BUILD_BLUEPRINT note).
         if not isinstance(payload, dict):
-            return {"tld_count": None, "tlds_registered": None, "tlds_checked": None}
-        regd = payload.get("tlds_registered")
-        if not isinstance(regd, list):
-            regd = None
-        count = payload.get("tld_count")
-        if not isinstance(count, int):
-            count = len(regd) if regd is not None else None
-        checked = payload.get("tlds_checked")
-        if not isinstance(checked, int):
-            # Absent -> UNKNOWN, not the count we requested. Asserting len(CURATED_TLDS)
-            # would fabricate a checked-count the server never confirmed (None != 0).
-            checked = None
-        return {"tld_count": count, "tlds_registered": regd, "tlds_checked": checked}
+            return {"registered": None, "lifecycle_phase": None, "registry_status": None}
+        results = payload.get("results")
+        row = results[0] if isinstance(results, list) and results else None
+        if not isinstance(row, dict):
+            return {"registered": None, "lifecycle_phase": None, "registry_status": None}
+        available = row.get("available")
+        # registered = NOT available; None if availability wasn't reported (never fabricate).
+        registered = (not available) if isinstance(available, bool) else None
+        phase = row.get("lifecycle_phase") or row.get("status") or None
+        flags = row.get("registry_status")
+        if not isinstance(flags, list):
+            flags = None
+        return {"registered": registered, "lifecycle_phase": phase,
+                "registry_status": flags}
 
 
 def _as_int(v):
