@@ -149,11 +149,20 @@ class EstibotAdapter(EnrichmentAdapter):
             return self._error(domain, "estibot: cache_miss (not_found)")
 
         results = payload.get("results")
-        if not isinstance(results, list) or not results:
+        # Live API returns results as an OBJECT {data:[...], total, count} on success,
+        # NOT a bare array (the earlier docstring had this backwards). Unwrap results.data
+        # to get the row list; tolerate a bare list defensively in case a response differs.
+        if isinstance(results, dict):
+            rows = results.get("data")
+        elif isinstance(results, list):
+            rows = results
+        else:
+            rows = None
+        if not isinstance(rows, list) or not rows:
             # success:true, not in not_found, yet no row -> UNKNOWN, not a measurement.
             return self._error(domain, "estibot: success with empty results")
 
-        row = results[0]                                 # one domain per call -> one row
+        row = rows[0]                                     # one domain per call -> one row
         data = {
             "estimated_value": _usd(row.get("appraised_value")),
             "wholesale_value": _usd(row.get("appraised_wholesale_value")),
