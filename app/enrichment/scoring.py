@@ -61,8 +61,11 @@ WEIGHTS = {
 # --- Value: log-scaled USD. Blueprint: "$0–$50 → low, $5k+ → high".
 # Below FLOOR -> 0; at/above CEIL -> 100; log-interpolated between. Log because value is
 # perceived multiplicatively ($100->$1k feels like $1k->$10k), not linearly.
-VALUE_FLOOR_USD = 50.0      # at/below this, Value sub-score = 0
-VALUE_CEIL_USD = 5000.0     # at/above this, Value sub-score = 100
+VALUE_FLOOR_USD = 100.0       # at/below this, Value sub-score = 0
+VALUE_CEIL_USD = 10_000_000.0  # at/above this -> 100 AND the off-scale asterisk flag
+# Option B value blend: geometric mean of Estibot and HumbleWorth-marketplace. HumbleWorth
+# is the conservative anchor; when it reads low, that LOW value stands (no Estibot rescue).
+# Missing one source -> use the other; missing both -> None.
 
 # --- Authority: each source normalized to 0–100, then COMBINED by "best signal lifts it"
 # (triangulated: a domain strong on ANY one source is high). We take a soft-max-ish blend:
@@ -188,12 +191,30 @@ def _data(enrichment, adapter):
     return row.get("data") or {}
 
 
+def blended_value_usd(enrichment):
+    """Option B: geometric mean of Estibot estimated_value and HumbleWorth marketplace.
+    HumbleWorth's low readings STAND (no Estibot rescue). One source missing -> use the
+    other; both missing -> None. Returns a USD float or None."""
+    est = hw = None
+    ed = _data(enrichment, "estibot")
+    if ed is not None:
+        v = ed.get("estimated_value")
+        if v is not None and v > 0:
+            est = float(v)
+    hd = _data(enrichment, "humbleworth")
+    if hd is not None:
+        v = hd.get("marketplace")
+        if v is not None and v > 0:
+            hw = float(v)
+    import math
+    if est is not None and hw is not None:
+        return math.sqrt(est * hw)
+    return est if est is not None else hw
+
+
 def score_value(enrichment):
-    """Value = log-scaled Estibot appraisal. Absent estibot / no appraisal -> None."""
-    d = _data(enrichment, "estibot")
-    if d is None:
-        return None
-    return _log_scale(d.get("estimated_value"), VALUE_FLOOR_USD, VALUE_CEIL_USD)
+    """Value = log-scaled blended (Estibot x HumbleWorth-marketplace) appraisal."""
+    return _log_scale(blended_value_usd(enrichment), VALUE_FLOOR_USD, VALUE_CEIL_USD)
 
 
 def score_authority(enrichment):

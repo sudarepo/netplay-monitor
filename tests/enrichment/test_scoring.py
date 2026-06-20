@@ -75,10 +75,10 @@ def _domscan(health, reputation):
 def test_log_scale_floor_ceil_and_absent():
     assert _log_scale(None, VALUE_FLOOR_USD, VALUE_CEIL_USD) is None     # absent -> None
     assert _log_scale(0, VALUE_FLOOR_USD, VALUE_CEIL_USD) == 0.0         # measured 0 -> 0
-    assert _log_scale(50, VALUE_FLOOR_USD, VALUE_CEIL_USD) == 0.0        # at floor
-    assert _log_scale(5000, VALUE_FLOOR_USD, VALUE_CEIL_USD) == 100.0    # at ceil
-    assert _log_scale(10000, VALUE_FLOOR_USD, VALUE_CEIL_USD) == 100.0   # above ceil
-    mid = _log_scale(500, VALUE_FLOOR_USD, VALUE_CEIL_USD)               # between
+    assert _log_scale(100, VALUE_FLOOR_USD, VALUE_CEIL_USD) == 0.0       # at floor
+    assert _log_scale(10_000_000, VALUE_FLOOR_USD, VALUE_CEIL_USD) == 100.0  # at ceil
+    assert _log_scale(50_000_000, VALUE_FLOOR_USD, VALUE_CEIL_USD) == 100.0  # above ceil
+    mid = _log_scale(50_000, VALUE_FLOOR_USD, VALUE_CEIL_USD)            # between
     assert 0.0 < mid < 100.0
 
 
@@ -92,10 +92,13 @@ def test_inverse_rank_absent_is_none():
 # --- Value dimension ----------------------------------------------------
 
 def test_value_present_and_absent():
-    assert score_value({"estibot": _estibot(5000)}) == 100.0
-    assert score_value({"estibot": _estibot(10)}) == 0.0                 # measured-low
+    assert score_value({"estibot": _estibot(10_000_000)}) == 100.0       # at ceiling
+    assert score_value({"estibot": _estibot(50)}) == 0.0                 # below $100 floor
     assert score_value({}) is None                                       # absent -> None
     assert score_value({"estibot": _fail()}) is None                     # failed -> None
+    blended = score_value({"estibot": _estibot(1_000_000),
+                           "humbleworth": _ok({"marketplace": 4_000_000})})
+    assert blended is not None and 70.0 < blended < 100.0
 
 
 # --- Authority triangulation + asymmetric rule --------------------------
@@ -179,7 +182,7 @@ def test_tier_A_mission_critical():
 
 def test_tier_B_strategic_high_value_not_used():
     # High value but not resolving (no domscan) -> B (hold for strategic value).
-    enr = {"estibot": _estibot(5000)}
+    enr = {"estibot": _estibot(5_000_000)}
     r = score_domain("x.com", enr)
     assert r.tier == "B"
 
