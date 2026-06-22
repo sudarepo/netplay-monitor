@@ -59,7 +59,12 @@ class HumbleworthAdapter(EnrichmentAdapter):
     name = "humbleworth"
     BASE_URL = "https://api.replicate.com/v1/predictions"
     API_KEY_ENV = "REPLICATE_API_TOKEN"
-    MAX_CONCURRENCY = 4                       # politeness; Replicate is metered
+    # Replicate rate-limits the synchronous predictions endpoint; concurrent batch runs
+    # hit 429s. Run single-flight through the base throttle: SEQUENTIAL routes enrich_many
+    # to one-call-at-a-time with a 60/RATE_LIMIT_PER_MIN sleep after each = 3.0s here.
+    SEQUENTIAL = True
+    RATE_LIMIT_PER_MIN = 20                   # 60/20 = 3.0s between calls; 429-safe
+    MAX_CONCURRENCY = 4                       # ignored while SEQUENTIAL; kept as intent
     TIMEOUT = httpx.Timeout(connect=5.0, read=60.0, write=5.0, pool=5.0)  # sync wait can hold
 
     MAX_429_RETRIES = 3

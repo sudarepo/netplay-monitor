@@ -156,6 +156,26 @@ def test_hw_transport_error_single_attempt():
     assert client.calls == 1
 
 
+def test_hw_enrich_many_is_sequential_and_throttled(monkeypatch):
+    # HumbleWorth is the FIRST live user of the base SEQUENTIAL/RATE_LIMIT_PER_MIN path,
+    # so prove the throttle actually fires. Stub enrich_one (no network) and record sleeps.
+    adapter = _adapter()
+
+    async def fake_enrich_one(client, domain):
+        return adapter._result(domain, {"marketplace": 100.0})
+    monkeypatch.setattr(adapter, "enrich_one", fake_enrich_one)
+
+    sleeps = []
+
+    async def rec_sleep(d):
+        sleeps.append(d)
+    monkeypatch.setattr(asyncio, "sleep", rec_sleep)
+
+    rows = _run(adapter.enrich_many(["a.com", "b.com", "c.com"]))
+    assert [r["domain"] for r in rows] == ["a.com", "b.com", "c.com"]  # in-order => single-flight
+    assert sleeps == [3.0, 3.0, 3.0]   # 3.0s throttle fired once per domain (SEQUENTIAL branch ran)
+
+
 def test_usd_sentinel():
     assert _usd(3500) == 3500.0
     assert _usd("1200.5") == 1200.5
