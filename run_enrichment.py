@@ -17,6 +17,7 @@ ADAPTERS = [
     ("whoxy",            "app.enrichment.whoxy",            "WhoxyAdapter",           "paid"),
     ("domscan",          "app.enrichment.domscan",          "DomscanAdapter",         "paid"),
     ("estibot",          "app.enrichment.estibot",          "EstibotAdapter",         "paid"),
+    ("humbleworth",      "app.enrichment.humbleworth",      "HumbleworthAdapter",     "paid"),
     ("ahrefs",           "app.enrichment.ahrefs",           "AhrefsAdapter",          "paid"),
 ]
 
